@@ -6,31 +6,34 @@ import { series } from '../common/chart-utils';
 export class InterfacesService {
   constructor(private readonly db: DbService) {}
 
-  async getInterfaces() {
-    // Pull interfaces for device id=1 (core-sw-01) as the default view;
-    // the frontend doesn't currently pass a device filter.
+  async getInterfaces(deviceId?: number) {
     const { rows } = await this.db.query<{
       id: number; name: string; description: string | null;
       vlan: string | null; duplex: string; speed: string | null; status: string;
-    }>(`
-      SELECT i.id, i.name, i.description, i.vlan, i.duplex, i.speed, i.status
-      FROM interfaces i
-      WHERE i.device_id = (SELECT id FROM devices WHERE name = 'core-sw-01' LIMIT 1)
-      ORDER BY i.id
-    `);
+      device_id: number;
+    }>(
+      deviceId
+        ? `SELECT i.id, i.name, i.description, i.vlan, i.duplex, i.speed, i.status, i.device_id
+           FROM interfaces i WHERE i.device_id = $1 ORDER BY i.name`
+        : `SELECT i.id, i.name, i.description, i.vlan, i.duplex, i.speed, i.status, i.device_id
+           FROM interfaces i
+           WHERE i.device_id = (SELECT id FROM devices WHERE name = 'core-sw-01' LIMIT 1)
+           ORDER BY i.id`,
+      deviceId ? [deviceId] : [],
+    );
 
-    // Use stored utilization constants mirrored from the original service so
-    // the UI numbers are stable until interface_metrics is populated by polling.
     const UTIL   = [22, 41, 6, 78, 12, 91, 4, 67, 0, 33, 51, 18, 28, 96];
     const ERRORS = [0,  0,  0, 2,  0,  0,  0, 17, 0, 3,  0,  0,  0,  128];
 
     return rows.map((r, i) => {
-      const util = UTIL[i] ?? 20;
-      const errs = ERRORS[i] ?? 0;
+      const util = UTIL[i % UTIL.length] ?? 20;
+      const errs = ERRORS[i % ERRORS.length] ?? 0;
       return {
+        id:      r.id,
         name:    r.name,
+        description: r.description ?? '',
         desc:    r.description ?? '',
-        vlan:    r.vlan        ?? '—',
+        vlan:    r.vlan        ?? null,
         duplex:  r.duplex,
         speed:   r.speed       ?? '1G',
         inMbps:  (util * 10.2).toFixed(1),
@@ -61,9 +64,9 @@ export class InterfacesService {
     };
   }
 
-  async getAll() {
+  async getAll(deviceId?: number) {
     const [interfaces, summary] = await Promise.all([
-      this.getInterfaces(),
+      this.getInterfaces(deviceId),
       this.getSummary(),
     ]);
     return { interfaces, summary };

@@ -15,6 +15,7 @@ import { ServicesModule } from './services/services.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { ConfigurationModule } from './configuration/configuration.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { UsersModule } from './users/users.module';
     NotificationsModule,
     AuthModule,
     UsersModule,
+    ConfigurationModule,
   ],
 })
 export class AppModule {}

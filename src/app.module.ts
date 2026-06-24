@@ -16,6 +16,8 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ConfigurationModule } from './configuration/configuration.module';
+import { ReportsModule } from './reports/reports.module';
+import { SlaModule } from './sla/sla.module';
 
 @Module({
   imports: [
@@ -36,6 +38,8 @@ import { ConfigurationModule } from './configuration/configuration.module';
     AuthModule,
     UsersModule,
     ConfigurationModule,
+    ReportsModule,
+    SlaModule,
   ],
 })
 export class AppModule {}

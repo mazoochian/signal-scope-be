@@ -79,6 +79,44 @@ export class AlertsService {
     ]);
     return { alerts, ...summary };
   }
+
+  async getStats() {
+    const { rows } = await this.db.query<{ severity: string; n: string; ack: string }>(`
+      SELECT severity, COUNT(*) AS n, SUM(CASE WHEN acknowledged THEN 1 ELSE 0 END) AS ack
+      FROM alerts WHERE cleared_at IS NULL
+      GROUP BY severity
+    `);
+    let open = 0, critical = 0, major = 0, acknowledged = 0;
+    for (const r of rows) {
+      const n = Number(r.n);
+      open += n;
+      acknowledged += Number(r.ack);
+      if (r.severity === 'Critical') critical += n;
+      if (r.severity === 'Major')    major    += n;
+    }
+    return { open, critical, major, acknowledged };
+  }
+
+  async acknowledge(id: string): Promise<boolean> {
+    const { rowCount } = await this.db.query(
+      'UPDATE alerts SET acknowledged = true WHERE id = $1',
+      [id],
+    );
+    return (rowCount ?? 0) > 0;
+  }
+
+  async getAlertsByDevice(deviceName: string) {
+    const { rows } = await this.db.query<{ severity: string; n: string }>(`
+      SELECT severity, COUNT(*) AS n
+      FROM alerts
+      WHERE device_name = $1 AND cleared_at IS NULL
+      GROUP BY severity`,
+      [deviceName],
+    );
+    const counts: Record<string, number> = {};
+    for (const r of rows) counts[r.severity] = Number(r.n);
+    return counts;
+  }
 }
 
 function formatAge(firedAt: Date): string {

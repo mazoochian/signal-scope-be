@@ -13,6 +13,8 @@ import { InventoryModule } from './inventory/inventory.module';
 import { DiscoveryModule } from './discovery/discovery.module';
 import { ServicesModule } from './services/services.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -30,6 +32,8 @@ import { NotificationsModule } from './notifications/notifications.module';
     DiscoveryModule,
     ServicesModule,
     NotificationsModule,
+    AuthModule,
+    UsersModule,
   ],
 })
 export class AppModule {}

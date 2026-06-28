@@ -22,10 +22,12 @@ export class OverviewController {
         (s: { label?: string }) => s.label?.startsWith('SLA'),
       );
       if (slaIdx !== -1) {
+        const allMet = compliance.met === compliance.total;
         kpis.stats[slaIdx] = {
           ...kpis.stats[slaIdx],
           value: `${compliance.pct.toFixed(1)} %`,
-          delta: compliance.met === compliance.total ? 'met' : `${compliance.met}/${compliance.total}`,
+          delta: allMet ? 'met' : `${compliance.met}/${compliance.total}`,
+          tone:  allMet ? 'up' : compliance.pct >= 50 ? 'warn' : 'down',
         };
       }
     }

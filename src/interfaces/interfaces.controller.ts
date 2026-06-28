@@ -6,7 +6,15 @@ export class InterfacesController {
   constructor(private readonly svc: InterfacesService) {}
 
   @Get()
-  getAll(@Query('deviceId') deviceId?: string) {
-    return this.svc.getAll(deviceId ? Number(deviceId) : undefined);
+  getAll(
+    @Query('deviceId') deviceId?: string,
+    @Query('q')        q?: string,
+    @Query('status')   status?: string,
+  ) {
+    return this.svc.getAll({
+      deviceId: deviceId ? Number(deviceId) : undefined,
+      q,
+      status,
+    });
   }
 }

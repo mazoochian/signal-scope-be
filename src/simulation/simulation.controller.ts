@@ -1,9 +1,13 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { SimulationService } from './simulation.service';
+import { SlaService } from '../sla/sla.service';
 
 @Controller('simulation')
 export class SimulationController {
-  constructor(private readonly svc: SimulationService) {}
+  constructor(
+    private readonly svc: SimulationService,
+    private readonly sla: SlaService,
+  ) {}
 
   @Get('wan')
   getWan(@Query('points') points?: string) {
@@ -11,8 +15,22 @@ export class SimulationController {
   }
 
   @Get('kpis')
-  getKpis() {
-    return this.svc.getKpis();
+  async getKpis() {
+    const kpis = this.svc.getKpis();
+    const compliance = await this.sla.getComplianceSummary().catch(() => null);
+    if (compliance && Array.isArray(kpis.stats)) {
+      const idx = kpis.stats.findIndex((s: { label?: string }) => s.label?.startsWith('SLA'));
+      if (idx !== -1) {
+        const allMet = compliance.met === compliance.total;
+        kpis.stats[idx] = {
+          ...kpis.stats[idx],
+          value: `${compliance.pct.toFixed(1)} %`,
+          delta: allMet ? 'met' : `${compliance.met}/${compliance.total}`,
+          tone:  allMet ? 'up' : compliance.pct >= 50 ? 'warn' : 'down',
+        };
+      }
+    }
+    return kpis;
   }
 
   @Get('snapshot')

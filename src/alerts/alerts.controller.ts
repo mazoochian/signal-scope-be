@@ -24,4 +24,9 @@ export class AlertsController {
   acknowledge(@Param('id') id: string) {
     return this.svc.acknowledge(id);
   }
+
+  @Patch(':id/suppress')
+  suppress(@Param('id') id: string) {
+    return this.svc.suppress(id);
+  }
 }

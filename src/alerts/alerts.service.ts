@@ -10,11 +10,11 @@ export class AlertsService {
     const { rows } = await this.db.query<{
       id: string; severity: string; kind: string; title: string;
       device_name: string | null; iface: string | null; rule: string | null;
-      acknowledged: boolean; root_cause: string; child_count: number;
-      fired_at: Date;
+      acknowledged: boolean; suppressed: boolean; root_cause: string;
+      child_count: number; fired_at: Date;
     }>(`
       SELECT id, severity, kind, title, device_name, iface, rule,
-             acknowledged, root_cause, child_count, fired_at
+             acknowledged, suppressed, root_cause, child_count, fired_at
       FROM alerts
       WHERE cleared_at IS NULL
       ORDER BY
@@ -27,17 +27,18 @@ export class AlertsService {
     `);
 
     return rows.map((r) => ({
-      id:       r.id,
-      sev:      r.severity,
-      kind:     r.kind,
-      title:    r.title,
-      device:   r.device_name ?? '—',
-      iface:    r.iface       ?? '—',
-      rule:     r.rule        ?? '—',
-      ack:      r.acknowledged,
-      age:      formatAge(r.fired_at),
-      rc:       r.root_cause,
-      children: r.child_count,
+      id:         r.id,
+      sev:        r.severity,
+      kind:       r.kind,
+      title:      r.title,
+      device:     r.device_name ?? '—',
+      iface:      r.iface       ?? '—',
+      rule:       r.rule        ?? '—',
+      ack:        r.acknowledged,
+      suppressed: r.suppressed,
+      age:        formatAge(r.fired_at),
+      rc:         r.root_cause,
+      children:   r.child_count,
     }));
   }
 
@@ -77,7 +78,10 @@ export class AlertsService {
       this.getAlerts(),
       this.getSummary(),
     ]);
-    return { alerts, ...summary };
+    const open       = alerts.filter((a) => !a.suppressed).length;
+    const acked      = alerts.filter((a) => a.ack).length;
+    const suppressed = alerts.filter((a) => a.suppressed).length;
+    return { alerts, open, acked, suppressed, ...summary };
   }
 
   async getStats() {
@@ -99,9 +103,44 @@ export class AlertsService {
 
   async acknowledge(id: string): Promise<boolean> {
     const { rowCount } = await this.db.query(
-      'UPDATE alerts SET acknowledged = true WHERE id = $1',
+      `UPDATE alerts SET acknowledged = true WHERE id = $1`,
       [id],
     );
+    if ((rowCount ?? 0) > 0) {
+      const { rows } = await this.db.query<{ severity: string; device_name: string | null }>(
+        'SELECT severity, device_name FROM alerts WHERE id = $1', [id],
+      );
+      if (rows[0]) {
+        await this.db.query(
+          `INSERT INTO alert_history (time, alert_id, severity, state, device_name) VALUES (now(),$1,$2,'acknowledged',$3)`,
+          [id, rows[0].severity, rows[0].device_name],
+        );
+      }
+    }
+    return (rowCount ?? 0) > 0;
+  }
+
+  async suppress(id: string): Promise<boolean> {
+    const { rows: cur } = await this.db.query<{ suppressed: boolean }>(
+      'SELECT suppressed FROM alerts WHERE id = $1', [id],
+    );
+    if (!cur[0]) return false;
+    const next = !cur[0].suppressed;
+    const { rowCount } = await this.db.query(
+      `UPDATE alerts SET suppressed = $2, suppressed_at = $3 WHERE id = $1`,
+      [id, next, next ? new Date() : null],
+    );
+    if ((rowCount ?? 0) > 0) {
+      const { rows } = await this.db.query<{ severity: string; device_name: string | null }>(
+        'SELECT severity, device_name FROM alerts WHERE id = $1', [id],
+      );
+      if (rows[0]) {
+        await this.db.query(
+          `INSERT INTO alert_history (time, alert_id, severity, state, device_name) VALUES (now(),$1,$2,$3,$4)`,
+          [id, rows[0].severity, next ? 'suppressed' : 'unsuppressed', rows[0].device_name],
+        );
+      }
+    }
     return (rowCount ?? 0) > 0;
   }
 

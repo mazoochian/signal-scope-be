@@ -18,6 +18,8 @@ import { UsersModule } from './users/users.module';
 import { ConfigurationModule } from './configuration/configuration.module';
 import { ReportsModule } from './reports/reports.module';
 import { SlaModule } from './sla/sla.module';
+import { IntegrationsModule } from './integrations/integrations.module';
+import { GroupsModule } from './groups/groups.module';
 
 @Module({
   imports: [
@@ -40,6 +42,8 @@ import { SlaModule } from './sla/sla.module';
     ConfigurationModule,
     ReportsModule,
     SlaModule,
+    IntegrationsModule,
+    GroupsModule,
   ],
 })
 export class AppModule {}

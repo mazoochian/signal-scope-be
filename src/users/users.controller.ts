@@ -4,49 +4,53 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  NotFoundException,
   Param,
   ParseIntPipe,
   Post,
   Put,
   Req,
-  UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { UsersService, CreateUserDto, UpdateUserDto } from './users.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/guards/roles.decorator';
-
-const ROLE_RANK: Record<string, number> = {
-  superadmin: 100, admin: 80, operator: 60, troubleshooter: 40, viewer: 20,
-};
+import { Permission } from '../auth/guards/permission.decorator';
+import { PermissionsService } from '../permissions/permissions.service';
 
 @Controller('users')
-@UseGuards(JwtAuthGuard, RolesGuard)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly permissionsService: PermissionsService,
+  ) {}
 
   @Get()
-  @Roles('admin')
+  @Permission('users', 'read')
   list() {
     return this.usersService.list();
   }
 
+  // Self-access bypass: authenticated users can always read their own profile.
+  // Others need the 'users:read' permission.
   @Get(':id')
   async getOne(@Param('id', ParseIntPipe) id: number, @Req() req: Request) {
     const me = (req as any).user;
-    if (me.id !== id && ROLE_RANK[me.role] < 80) throw new ForbiddenException();
+    if (me.id !== id && !this.permissionsService.can(me.role, 'users', 'read')) {
+      throw new ForbiddenException();
+    }
     const user = await this.usersService.findById(id);
-    if (!user) throw new ForbiddenException();
+    if (!user) throw new NotFoundException();
     return this.usersService.toDto(user);
   }
 
   @Post()
-  @Roles('admin')
+  @Permission('users', 'write')
   create(@Body() dto: CreateUserDto) {
     return this.usersService.create(dto);
   }
 
+  // Self-edit bypass: authenticated users can always update their own profile,
+  // but cannot change their own role. Others need 'users:write'. Superadmin
+  // accounts can only be modified by superadmins.
   @Put(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,
@@ -54,29 +58,46 @@ export class UsersController {
     @Req() req: Request,
   ) {
     const me = (req as any).user;
-    const isAdmin = ROLE_RANK[me.role] >= 80;
-    if (me.id !== id && !isAdmin) throw new ForbiddenException();
-    // non-admins cannot change role
-    if (!isAdmin && dto.role) throw new ForbiddenException('Cannot change own role');
+    const isSelf = me.id === id;
+    const canWrite = this.permissionsService.can(me.role, 'users', 'write');
+
+    if (!isSelf && !canWrite) throw new ForbiddenException();
+    if (!canWrite && dto.role) throw new ForbiddenException('Cannot change own role');
+
+    const target = await this.usersService.findById(id);
+    if (!target) throw new NotFoundException();
+
+    if (target.role === 'superadmin' && me.role !== 'superadmin') {
+      throw new ForbiddenException('Superadmin accounts can only be modified by superadmins');
+    }
+
     return this.usersService.update(id, dto);
   }
 
   @Delete(':id')
-  @Roles('admin')
+  @Permission('users', 'delete')
   async remove(@Param('id', ParseIntPipe) id: number, @Req() req: Request) {
     const me = (req as any).user;
     if (me.id === id) throw new ForbiddenException('Cannot delete yourself');
+
+    const target = await this.usersService.findById(id);
+    if (!target) throw new NotFoundException();
+
+    if (target.role === 'superadmin' && me.role !== 'superadmin') {
+      throw new ForbiddenException('Superadmin accounts can only be deleted by superadmins');
+    }
+
     return this.usersService.remove(id);
   }
 
   @Get(':id/grants')
-  @Roles('admin')
+  @Permission('users', 'read')
   getGrants(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.getGrants(id);
   }
 
   @Post(':id/grants')
-  @Roles('admin')
+  @Permission('users', 'write')
   addGrant(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: { resourceType: string; resourceId?: string; permission: string },
@@ -85,7 +106,7 @@ export class UsersController {
   }
 
   @Delete(':id/grants/:grantId')
-  @Roles('admin')
+  @Permission('users', 'delete')
   removeGrant(@Param('grantId', ParseIntPipe) grantId: number) {
     return this.usersService.removeGrant(grantId);
   }

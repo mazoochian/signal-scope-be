@@ -8,12 +8,11 @@ import {
   Query,
   Req,
   Res,
-  UseGuards,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { OidcService } from '../oidc/oidc.service';
+import { Public } from './guards/public.decorator';
 
 @Controller('auth')
 export class AuthController {
@@ -23,6 +22,7 @@ export class AuthController {
   ) {}
 
   @Post('login')
+  @Public()
   @HttpCode(200)
   async login(
     @Body() body: { email: string; password: string },
@@ -34,6 +34,7 @@ export class AuthController {
   }
 
   @Post('logout')
+  @Public()
   @HttpCode(200)
   logout(@Res({ passthrough: true }) res: Response) {
     this.authService.clearTokenCookie(res);
@@ -41,12 +42,12 @@ export class AuthController {
   }
 
   @Get('me')
-  @UseGuards(JwtAuthGuard)
   me(@Req() req: Request) {
     return (req as any).user;
   }
 
   @Get('oidc/:providerId/authorize')
+  @Public()
   async oidcAuthorize(
     @Param('providerId') providerId: string,
     @Res() res: Response,
@@ -56,6 +57,7 @@ export class AuthController {
   }
 
   @Get('oidc/:providerId/callback')
+  @Public()
   async oidcCallback(
     @Param('providerId') providerId: string,
     @Query('code') code: string,
@@ -73,6 +75,7 @@ export class AuthController {
   }
 
   @Post('telegram/:providerId')
+  @Public()
   @HttpCode(200)
   async telegramAuth(
     @Param('providerId') providerId: string,

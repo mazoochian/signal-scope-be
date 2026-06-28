@@ -2,6 +2,7 @@ import { Controller, Get } from '@nestjs/common';
 import { OverviewService } from './overview.service';
 import { SimulationService } from '../simulation/simulation.service';
 import { SlaService } from '../sla/sla.service';
+import { Permission } from '../auth/guards/permission.decorator';
 
 @Controller('overview')
 export class OverviewController {
@@ -12,11 +13,11 @@ export class OverviewController {
   ) {}
 
   @Get()
+  @Permission('dashboard', 'read')
   async getAll() {
     const kpis = this.sim.getKpis();
     const compliance = await this.sla.getComplianceSummary().catch(() => null);
 
-    // Patch the SLA stat with live compliance data
     if (compliance && Array.isArray(kpis.stats)) {
       const slaIdx = kpis.stats.findIndex(
         (s: { label?: string }) => s.label?.startsWith('SLA'),

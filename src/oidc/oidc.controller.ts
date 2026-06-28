@@ -1,46 +1,32 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  ParseIntPipe,
-  Post,
-  Put,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
 import { OidcService } from './oidc.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/guards/roles.decorator';
+import { Public } from '../auth/guards/public.decorator';
+import { Permission } from '../auth/guards/permission.decorator';
 
 @Controller('oidc')
 export class OidcController {
   constructor(private readonly oidcService: OidcService) {}
 
   @Get('providers')
+  @Public()
   listProviders() {
-    // Public: frontend needs provider list for login page
     return this.oidcService.listProviders();
   }
 
   @Post('providers')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Permission('oidc', 'write')
   createProvider(@Body() body: any) {
     return this.oidcService.createProvider(body);
   }
 
   @Put('providers/:id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Permission('oidc', 'write')
   updateProvider(@Param('id', ParseIntPipe) id: number, @Body() body: any) {
     return this.oidcService.updateProvider(id, body);
   }
 
   @Delete('providers/:id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
+  @Permission('oidc', 'delete')
   deleteProvider(@Param('id', ParseIntPipe) id: number) {
     return this.oidcService.deleteProvider(id);
   }

@@ -9,6 +9,7 @@ export interface UserRecord {
   firstName: string | null;
   lastName: string | null;
   age: number | null;
+  avatarUrl: string | null;
   role: string;
   isActive: boolean;
   createdAt: Date;
@@ -20,6 +21,7 @@ export interface UserDto {
   firstName: string | null;
   lastName: string | null;
   age: number | null;
+  avatarUrl: string | null;
   role: string;
   isActive: boolean;
 }
@@ -44,6 +46,7 @@ export interface UpdateUserDto {
   firstName?: string;
   lastName?: string;
   age?: number;
+  avatarUrl?: string;
   role?: string;
   isActive?: boolean;
   password?: string;
@@ -57,7 +60,7 @@ export class UsersService {
     const { rows } = await this.db.query<{
       id: number; email: string; password_hash: string | null;
       first_name: string | null; last_name: string | null; age: number | null;
-      role: string; is_active: boolean; created_at: Date;
+      avatar_url: string | null; role: string; is_active: boolean; created_at: Date;
     }>('SELECT * FROM users WHERE email = $1', [email]);
     if (!rows[0]) return null;
     return this.rowToRecord(rows[0]);
@@ -67,7 +70,7 @@ export class UsersService {
     const { rows } = await this.db.query<{
       id: number; email: string; password_hash: string | null;
       first_name: string | null; last_name: string | null; age: number | null;
-      role: string; is_active: boolean; created_at: Date;
+      avatar_url: string | null; role: string; is_active: boolean; created_at: Date;
     }>('SELECT * FROM users WHERE id = $1', [id]);
     if (!rows[0]) return null;
     return this.rowToRecord(rows[0]);
@@ -76,11 +79,12 @@ export class UsersService {
   async list(): Promise<UserDto[]> {
     const { rows } = await this.db.query<{
       id: number; email: string; first_name: string | null;
-      last_name: string | null; age: number | null; role: string; is_active: boolean;
-    }>('SELECT id, email, first_name, last_name, age, role, is_active FROM users ORDER BY id');
+      last_name: string | null; age: number | null; avatar_url: string | null;
+      role: string; is_active: boolean;
+    }>('SELECT id, email, first_name, last_name, age, avatar_url, role, is_active FROM users ORDER BY id');
     return rows.map((r) => ({
       id: r.id, email: r.email, firstName: r.first_name, lastName: r.last_name,
-      age: r.age, role: r.role, isActive: r.is_active,
+      age: r.age, avatarUrl: r.avatar_url, role: r.role, isActive: r.is_active,
     }));
   }
 
@@ -103,17 +107,19 @@ export class UsersService {
     const hash = dto.password ? await bcrypt.hash(dto.password, 10) : undefined;
     await this.db.query(
       `UPDATE users SET
-         first_name   = COALESCE($1, first_name),
-         last_name    = COALESCE($2, last_name),
-         age          = COALESCE($3, age),
-         role         = COALESCE($4, role),
-         is_active    = COALESCE($5, is_active),
-         password_hash= COALESCE($6, password_hash),
-         updated_at   = NOW()
-       WHERE id = $7`,
+         first_name    = COALESCE($1, first_name),
+         last_name     = COALESCE($2, last_name),
+         age           = COALESCE($3, age),
+         role          = COALESCE($4, role),
+         is_active     = COALESCE($5, is_active),
+         password_hash = COALESCE($6, password_hash),
+         avatar_url    = COALESCE($7, avatar_url),
+         updated_at    = NOW()
+       WHERE id = $8`,
       [
         dto.firstName ?? null, dto.lastName ?? null, dto.age ?? null,
-        dto.role ?? null, dto.isActive ?? null, hash ?? null, id,
+        dto.role ?? null, dto.isActive ?? null, hash ?? null,
+        dto.avatarUrl ?? null, id,
       ],
     );
     return this.toDto((await this.findById(id))!);
@@ -149,19 +155,20 @@ export class UsersService {
   toDto(user: UserRecord): UserDto {
     return {
       id: user.id, email: user.email, firstName: user.firstName,
-      lastName: user.lastName, age: user.age, role: user.role, isActive: user.isActive,
+      lastName: user.lastName, age: user.age, avatarUrl: user.avatarUrl,
+      role: user.role, isActive: user.isActive,
     };
   }
 
   private rowToRecord(r: {
     id: number; email: string; password_hash: string | null;
     first_name: string | null; last_name: string | null; age: number | null;
-    role: string; is_active: boolean; created_at: Date;
+    avatar_url: string | null; role: string; is_active: boolean; created_at: Date;
   }): UserRecord {
     return {
       id: r.id, email: r.email, passwordHash: r.password_hash,
       firstName: r.first_name, lastName: r.last_name, age: r.age,
-      role: r.role, isActive: r.is_active, createdAt: r.created_at,
+      avatarUrl: r.avatar_url, role: r.role, isActive: r.is_active, createdAt: r.created_at,
     };
   }
 }

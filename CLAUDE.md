@@ -2,13 +2,15 @@
 
 ## Branch rules
 
-- **Never commit directly to `main`.** All work goes on a dedicated branch.
-- Branch naming: `claude/<short-task-slug>` (e.g. `claude/fix-wan-chart`, `claude/add-device-delete`).
-- Create the branch at the start of the session if it doesn't already exist:
+- **Never commit directly to `main` or `develop`.** All work goes on `feature/claude`.
+- There is one persistent remote branch for Claude's work: **`feature/claude`** on origin.
+- At the start of each session, check out or create `feature/claude` and pull the latest:
   ```bash
-  git checkout -b claude/<task-slug>
+  git checkout feature/claude 2>/dev/null || git checkout -b feature/claude origin/develop
+  git pull origin feature/claude --rebase
   ```
-- Open a pull request against `main` when the work is ready for review. The human merges.
+- Push completed work to `origin/feature/claude` and open a pull request against **`develop`**.
+- The human reviews and merges `feature/claude` → `develop`, then `develop` → `master` when confident.
 
 ## Reviewing human branches
 
@@ -21,6 +23,27 @@ When asked to review a branch the human has pushed:
 ## Commit style
 
 - Commit messages: short imperative summary line, then a blank line and a body if the why isn't obvious.
+- Body format: The body of the commit message should follow the following format:
+  ```
+  Features Added:
+   + Item
+   + ...
+  Functionalities Revised:
+   o Item
+   o ...
+  Bugs Fixed:
+   - Item
+   - ...
+  ```
+  If there are no changes in one of the blocks simply put 'nothing' like so:
+  ```
+  Features Added:
+   + Nothing
+  Functionalities Revised:
+   o Nothing
+  Bugs Fixed:
+   - Fixed issue#34 (link to the issue)
+  ```
 - Always append the co-author trailer:
   ```
   Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>

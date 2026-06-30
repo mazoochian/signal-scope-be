@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { DbService } from '../db/db.service';
 import { SimulationEngine } from './simulation.engine';
+import { AlertEvaluator } from './alert-evaluator';
 
 // Write a batch of device metrics to the DB every N ticks.
 // At 2 s/tick this gives one DB write per 10 s instead of per 2 s.
@@ -10,11 +11,14 @@ const WRITE_EVERY_N_TICKS = 5;
 export class SimulationService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger(SimulationService.name);
   private readonly engine = new SimulationEngine();
+  private readonly alertEvaluator: AlertEvaluator;
   private timer: NodeJS.Timeout;
   private tickCount = 0;
   private deviceIdCache: Map<string, number> | null = null;
 
-  constructor(private readonly db: DbService) {}
+  constructor(private readonly db: DbService) {
+    this.alertEvaluator = new AlertEvaluator(db);
+  }
 
   onModuleInit() {
     this.timer = setInterval(() => this.onTick(), 2000);
@@ -31,6 +35,9 @@ export class SimulationService implements OnModuleInit, OnModuleDestroy {
     if (this.tickCount % WRITE_EVERY_N_TICKS === 0) {
       await this.persistMetrics().catch((err: Error) =>
         this.log.warn(`device_metrics write failed: ${err.message}`),
+      );
+      await this.alertEvaluator.evaluate(this.engine.getSnapshot()).catch((err: Error) =>
+        this.log.warn(`alert evaluation failed: ${err.message}`),
       );
     }
   }

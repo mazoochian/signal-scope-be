@@ -115,7 +115,10 @@ export class AlertEvaluator {
   private initialized = false;
   private deviceIds: Map<string, number> | null = null;
 
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly onAlertFired?: (alert: { id: string; severity: string; title: string; device: string; fired_at: Date }) => void,
+  ) {}
 
   private nextId(): string {
     return `ALR-${this.counter++}`;
@@ -194,6 +197,9 @@ export class AlertEvaluator {
       );
       this.openAlerts.set(key, id);
       this.log.log(`FIRED ${id} [${rule.severity}] ${title}`);
+      Promise.resolve()
+        .then(() => this.onAlertFired?.({ id, severity: rule.severity, title, device: d.name, fired_at: new Date() }))
+        .catch(() => {});
     } catch (err: any) {
       this.log.warn(`Failed to fire alert ${id}: ${err.message}`);
     }

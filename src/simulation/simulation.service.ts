@@ -11,13 +11,17 @@ const WRITE_EVERY_N_TICKS = 5;
 export class SimulationService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger(SimulationService.name);
   private readonly engine = new SimulationEngine();
-  private readonly alertEvaluator: AlertEvaluator;
+  private alertEvaluator: AlertEvaluator;
   private timer: NodeJS.Timeout;
   private tickCount = 0;
   private deviceIdCache: Map<string, number> | null = null;
 
   constructor(private readonly db: DbService) {
     this.alertEvaluator = new AlertEvaluator(db);
+  }
+
+  setAlertNotifier(fn: (alert: { id: string; severity: string; title: string; device: string; fired_at: Date }) => void) {
+    this.alertEvaluator = new AlertEvaluator(this.db, fn);
   }
 
   onModuleInit() {

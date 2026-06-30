@@ -227,8 +227,15 @@ export class OidcService {
       };
     }
     if (!provider.discoveryUrl) throw new BadRequestException('No discovery URL or manual endpoints configured');
-    const res = await fetch(provider.discoveryUrl);
-    if (!res.ok) throw new BadRequestException('Failed to fetch OIDC discovery document');
+    let res: Response;
+    try {
+      res = await fetch(provider.discoveryUrl);
+    } catch (e: unknown) {
+      const msg   = e instanceof Error ? e.message : String(e);
+      const cause = e instanceof Error && (e as any).cause instanceof Error ? (e as any).cause.message : null;
+      throw new BadRequestException(`Cannot reach OIDC discovery URL (${provider.discoveryUrl}): ${msg}${cause ? ` — ${cause}` : ''}`);
+    }
+    if (!res.ok) throw new BadRequestException(`Failed to fetch OIDC discovery document (${res.status} ${res.statusText} — ${provider.discoveryUrl})`);
     return res.json();
   }
 

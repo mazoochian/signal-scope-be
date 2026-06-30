@@ -1,18 +1,13 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
-import { UsersModule } from '../users/users.module';
+import { ReportsModule } from '../reports/reports.module';
 import { IntegrationsController } from './integrations.controller';
 import { IntegrationsService } from './integrations.service';
+import { EmailNotificationsService } from './email-notifications.service';
 
 @Module({
-  imports: [
-    JwtModule.register({
-      secret: process.env.JWT_SECRET ?? 'dev-secret-change-me',
-      signOptions: { expiresIn: '7d' },
-    }),
-    UsersModule,
-  ],
+  imports: [ReportsModule],
   controllers: [IntegrationsController],
-  providers: [IntegrationsService],
+  providers: [IntegrationsService, EmailNotificationsService],
+  exports: [IntegrationsService, EmailNotificationsService],
 })
 export class IntegrationsModule {}

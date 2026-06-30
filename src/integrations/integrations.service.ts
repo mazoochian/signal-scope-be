@@ -60,19 +60,33 @@ export class IntegrationsService implements OnModuleInit {
     return config;
   }
 
-  async testEmail(cfg: EmailConfig & { testRecipient?: string }): Promise<void> {
+  private buildTransport(cfg: EmailConfig) {
     const port = parseInt(cfg.port, 10) || 587;
-    const secure = cfg.security === 'ssl';
-    const requireTls = cfg.security === 'starttls';
-
-    const transport = nodemailer.createTransport({
+    return nodemailer.createTransport({
       host: cfg.host,
       port,
-      secure,
-      requireTLS: requireTls,
+      secure: cfg.security === 'ssl',
+      requireTLS: cfg.security === 'starttls',
       auth: { user: cfg.username, pass: cfg.password },
     });
+  }
 
+  async sendEmail(to: string[], subject: string, html: string): Promise<void> {
+    const cfg = await this.getConfig<EmailConfig>('email');
+    if (!cfg?.enabled) throw new Error('Email integration is not enabled');
+    if (!cfg.host) throw new Error('Email SMTP host is not configured');
+
+    const transport = this.buildTransport(cfg);
+    await transport.sendMail({
+      from: `"${cfg.fromName || 'SignalScope NMS'}" <${cfg.fromAddress || cfg.username}>`,
+      to: to.join(', '),
+      subject,
+      html,
+    });
+  }
+
+  async testEmail(cfg: EmailConfig & { testRecipient?: string }): Promise<void> {
+    const transport = this.buildTransport(cfg);
     await transport.sendMail({
       from: `"${cfg.fromName || 'SignalScope NMS'}" <${cfg.fromAddress || cfg.username}>`,
       to: cfg.testRecipient || cfg.username,

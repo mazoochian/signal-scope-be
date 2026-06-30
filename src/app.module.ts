@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { AppController } from './app.controller';
@@ -29,6 +30,7 @@ import { PermissionsModule } from './permissions/permissions.module';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     DbModule,
     SimulationModule,
     HostMetricsModule,

@@ -27,6 +27,7 @@ import { SlaModule } from './sla/sla.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { GroupsModule } from './groups/groups.module';
 import { PermissionsModule } from './permissions/permissions.module';
+import { DeviceControlModule } from './device-control/device-control.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { PermissionsModule } from './permissions/permissions.module';
     IntegrationsModule,
     GroupsModule,
     PermissionsModule,
+    DeviceControlModule,
   ],
   controllers: [AppController],
   providers: [

@@ -75,14 +75,13 @@ export class PendingChangesService {
    * Drains queued changes for a device FIFO, on a down->up reachability
    * transition. Each change is re-attempted through the normal execution
    * path; a hard failure marks it 'failed' (retryable — stays visible,
-   * attempts increments) rather than silently dropping it. Actual
-   * before/after conflict detection (comparing expected_prior_state
-   * against a fresh read-back) is intentionally left to a fast-follow —
-   * this phase records expected_prior_state when supplied but does not
-   * yet block a drain on a mismatch, since none of the 4 vendors'
-   * initial action set has a cheap enough pre-check to justify the extra
-   * round trip within this session's scope. Documented as a known gap in
-   * device-control/README.md, not silently skipped.
+   * attempts increments) rather than silently dropping it. Before applying
+   * a row queued with an `expected_prior_state`, a fresh read-back is
+   * compared against it (see `checkConflict` below) — a mismatch means the
+   * device diverged from what the change assumed while it sat in the
+   * queue, and the row is marked 'conflict' instead of being applied
+   * blindly. A row queued without `expected_prior_state` skips the check
+   * entirely, same as before this existed.
    */
   async drainForDevice(deviceId: number): Promise<void> {
     const { rows } = await this.db.query<PendingChangeRow>(
@@ -95,6 +94,17 @@ export class PendingChangesService {
 
     for (const row of rows) {
       await this.db.query(`UPDATE pending_changes SET status = 'in_flight', attempts = attempts + 1, last_attempt_at = now() WHERE id = $1`, [row.id]);
+
+      if (row.expected_prior_state) {
+        const mismatch = await this.checkConflict(deviceId, row);
+        if (mismatch) {
+          await this.db.query(`UPDATE pending_changes SET status = 'conflict', last_error = $2 WHERE id = $1`, [row.id, mismatch]);
+          // Same first-blocking-issue-stops-the-queue behavior as a hard
+          // failure below — a human needs to look at this before later
+          // queued changes (which may depend on this one) are attempted.
+          break;
+        }
+      }
 
       try {
         const result = await this.workers.enqueueAndWait({
@@ -123,4 +133,37 @@ export class PendingChangesService {
       }
     }
   }
+
+  /**
+   * Pre-apply optimistic-concurrency check. Runs the action's adapter
+   * readback command (via a 'probe' request through the same per-device
+   * queue a real apply uses, preserving ordering) and compares the parsed
+   * result against `expected_prior_state`. Returns a human-readable
+   * mismatch description if the device has diverged, or null if it's safe
+   * to apply — either because the state matches, or because no check was
+   * possible (no CLI readback for this action, an SNMP-only target, or the
+   * probe itself failed to dial). A missing/failed check never blocks the
+   * drain on its own; it just means this safety net didn't run this time.
+   */
+  private async checkConflict(deviceId: number, row: PendingChangeRow): Promise<string | null> {
+    const probe = await this.workers.enqueueAndWait({
+      deviceId,
+      action: row.payload,
+      actorKind: 'system',
+      actorId: `pending-change-probe:${row.id}`,
+      mode: 'probe',
+    });
+    if (!probe.ok || probe.parsedState === undefined) return null;
+    if (deepEqual(probe.parsedState, row.expected_prior_state)) return null;
+    return `Expected prior state ${JSON.stringify(row.expected_prior_state)} but device currently reports ${JSON.stringify(probe.parsedState)}`;
+  }
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  const aKeys = Object.keys(a as Record<string, unknown>);
+  const bKeys = Object.keys(b as Record<string, unknown>);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((key) => deepEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
 }

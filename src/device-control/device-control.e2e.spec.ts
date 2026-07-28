@@ -277,6 +277,60 @@ describe('device-control offline queue + drain', () => {
     const auditRows = await audit.recentForDevice(deviceId);
     expect(auditRows.some((r: any) => r.actor_kind === 'agent' && r.command_text === 'shutdown')).toBe(true);
   });
+
+  it('lands a change in conflict, not applied, when expected_prior_state no longer matches the device', async () => {
+    const deviceId = await upsertDevice('jest-device-control-conflict', 'planned', 'unknown');
+
+    // The cisco-ios stub starts every fresh session with adminUp: true (see
+    // testing/scripts/cisco-ios.script.ts's initialVars) — queue this change
+    // against a deliberately wrong prior state (adminUp: false) so the
+    // pre-apply probe (which reads the real, still-true state) disagrees
+    // with it.
+    const pendingChangeId = await pending.queueChange({
+      deviceId,
+      action: { kind: 'port.setAdminStatus', interfaceName: 'GigabitEthernet0/1', adminStatus: 'down' },
+      requestedBy: 'jest',
+      expectedPriorState: { adminUp: false, operUp: false },
+    });
+
+    await connections.setConnectionTarget(deviceId, { transport: 'ssh', host: '127.0.0.1', port: SSH_PORT, kind: 'docker-simulator' });
+    await connections.storeCredential(deviceId, 'ssh_password', 'admin', 'admin');
+    await db.query(`UPDATE devices SET status = 'up' WHERE id = $1`, [deviceId]);
+    await pending.drainForDevice(deviceId);
+
+    const afterDrain = await pending.listForDevice(deviceId);
+    const row = afterDrain.find((r: any) => r.id === pendingChangeId) as any;
+    expect(row.status).toBe('conflict');
+    expect(row.last_error).toMatch(/expected prior state/i);
+
+    // The action itself must never have been sent — a conflict blocks the
+    // apply, it doesn't just note a discrepancy after the fact.
+    const auditRows = await audit.recentForDevice(deviceId);
+    expect(auditRows.some((r: any) => r.command_text === 'shutdown')).toBe(false);
+  });
+
+  it('applies normally when expected_prior_state matches the device', async () => {
+    const deviceId = await upsertDevice('jest-device-control-conflict-match', 'planned', 'unknown');
+
+    const pendingChangeId = await pending.queueChange({
+      deviceId,
+      action: { kind: 'port.setAdminStatus', interfaceName: 'GigabitEthernet0/1', adminStatus: 'down' },
+      requestedBy: 'jest',
+      expectedPriorState: { adminUp: true, operUp: true },
+    });
+
+    await connections.setConnectionTarget(deviceId, { transport: 'ssh', host: '127.0.0.1', port: SSH_PORT, kind: 'docker-simulator' });
+    await connections.storeCredential(deviceId, 'ssh_password', 'admin', 'admin');
+    await db.query(`UPDATE devices SET status = 'up' WHERE id = $1`, [deviceId]);
+    await pending.drainForDevice(deviceId);
+
+    const afterDrain = await pending.listForDevice(deviceId);
+    const row = afterDrain.find((r: any) => r.id === pendingChangeId) as any;
+    expect(row.status).toBe('applied');
+
+    const auditRows = await audit.recentForDevice(deviceId);
+    expect(auditRows.some((r: any) => r.command_text === 'shutdown')).toBe(true);
+  });
 });
 
 describe('device-control raw CLI passthrough', () => {

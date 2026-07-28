@@ -18,6 +18,8 @@ export interface DeviceActionRequest {
   actorId?: string | null;
   /** Skips the SNMP path entirely and forces CLI, or vice versa — mainly for testing each path independently against the simulator. */
   forceTransport?: 'cli' | 'snmp';
+  /** 'probe' reads back the action's current-state readback command WITHOUT applying buildCliPlan/buildSnmpPlan — used by pending-changes.service.ts's pre-drain conflict check. Defaults to 'apply'. Routed through the same per-device queue as a real apply so the two never race against each other's transport session. */
+  mode?: 'apply' | 'probe';
 }
 
 export interface DeviceActionResult {
@@ -28,6 +30,8 @@ export interface DeviceActionResult {
   error?: string;
   /** id of the last device_command_audit row written for this action — used by pending-changes.service.ts to link a drained offline change to the audit entry that applied it. */
   lastAuditId?: number;
+  /** Set only by a 'probe' request: adapter.parseReadback(...).after for the action's readback command. undefined means no check was possible (no CLI readback exists for this action, the device is SNMP-only, or the probe failed to dial) — callers must treat undefined as "can't verify", not as a mismatch. */
+  parsedState?: unknown;
 }
 
 const IF_NAME_OID_PREFIX = '1.3.6.1.2.1.31.1.1.1.1'; // ifXTable::ifName
@@ -66,6 +70,10 @@ export class DeviceActionRunnerService {
       return { ok: false, usedTransport: 'ssh', linesSent: [], error: 'No connection target configured for this device' };
     }
 
+    if (req.mode === 'probe') {
+      return this.probeState({ ...req, action: req.action }, target, adapter);
+    }
+
     const wantSnmp =
       req.forceTransport === 'snmp' ||
       (req.forceTransport !== 'cli' && target.transport === 'snmp');
@@ -74,6 +82,80 @@ export class DeviceActionRunnerService {
       return this.executeViaSnmp({ ...req, action: req.action }, target, adapter);
     }
     return this.executeViaCli({ ...req, action: req.action }, target, adapter);
+  }
+
+  /**
+   * Reads back current device state for an action WITHOUT applying it —
+   * the pre-apply half of drain conflict-detection (see
+   * sync/pending-changes.service.ts). Reuses the adapter's own
+   * buildReadbackCommand/parseReadback, the same mechanism used for the
+   * POST-apply confirmation in executeViaCli, just run before instead of
+   * after. Returns ok:true with parsedState left undefined (not an error)
+   * whenever no check is possible — no CLI readback exists for this
+   * action, or the device's primary target is SNMP-only (this phase's
+   * readback commands are CLI-only, per every adapter's buildReadbackCommand).
+   */
+  private async probeState(
+    req: DeviceActionRequest,
+    target: NonNullable<Awaited<ReturnType<DeviceConnectionService['getPrimaryTarget']>>>,
+    adapter: ReturnType<AdapterRegistryService['resolve']>,
+  ): Promise<DeviceActionResult> {
+    const action = req.action!;
+    const fallbackTransport: DeviceActionResult['usedTransport'] = target.transport === 'telnet' ? 'telnet' : 'ssh';
+
+    const readbackCmd = adapter.buildReadbackCommand(action);
+    if (!readbackCmd || target.transport === 'snmp') {
+      return { ok: true, usedTransport: fallbackTransport, linesSent: [] };
+    }
+
+    const transportKind = target.transport === 'telnet' ? 'telnet' : 'ssh';
+    const channel: CliChannel = transportKind === 'telnet' ? new TelnetCliTransport() : new SshCliTransport();
+    const credKind = transportKind === 'telnet' ? 'telnet_password' : 'ssh_password';
+    const credential = await this.connections.getDecryptedCredential(req.deviceId, credKind);
+    const sessionId = await this.audit.openSession(req.deviceId, transportKind);
+
+    try {
+      await channel.connect({
+        host: target.host,
+        port: target.port,
+        username: credential?.username ?? undefined,
+        password: credential?.secret,
+      });
+      await this.audit.markSessionOpen(sessionId);
+
+      const promptAll = Object.values(adapter.cliDialect.promptPatterns).filter(Boolean) as RegExp[];
+      if (adapter.cliDialect.enableSequence) {
+        for (const line of adapter.cliDialect.enableSequence) await channel.sendAndWait(line, promptAll);
+      }
+      if (adapter.cliDialect.pagingDisableCmd) {
+        await channel.sendAndWait(adapter.cliDialect.pagingDisableCmd, promptAll);
+      }
+
+      const out = await channel.sendAndWait(readbackCmd, promptAll);
+      const lastAuditId = await this.audit.record({
+        deviceId: req.deviceId, sessionId, actorKind: 'system', actorId: 'conflict-probe',
+        transport: transportKind, commandText: readbackCmd, rawResponse: out, result: 'ok',
+      });
+      const diff = adapter.parseReadback(action, out);
+
+      await channel.close();
+      await this.audit.closeSession(sessionId);
+      return { ok: true, usedTransport: transportKind, linesSent: [readbackCmd], readback: out, parsedState: diff.after, lastAuditId };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.audit.record({
+        deviceId: req.deviceId, sessionId, actorKind: 'system', actorId: 'conflict-probe',
+        transport: transportKind, commandText: readbackCmd, rawResponse: message, result: 'error',
+      });
+      await this.audit.closeSession(sessionId, undefined, message);
+      try { await channel.close(); } catch { /* already broken */ }
+      // A failed probe (e.g. the device flaked between the reachability
+      // sweep and this drain) doesn't block the drain — parsedState stays
+      // undefined, so the caller skips the conflict check and lets the
+      // real apply attempt below surface its own failure if the device is
+      // genuinely unreachable.
+      return { ok: false, usedTransport: transportKind, linesSent: [], error: message };
+    }
   }
 
   private async executeViaSnmp(

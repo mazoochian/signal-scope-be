@@ -20,12 +20,30 @@ import { CISCO_IOS_SCRIPT, VendorCliScript } from './scripts/cisco-ios.script';
 import { JUNIPER_JUNOS_SCRIPT } from './scripts/juniper-junos.script';
 import { ARISTA_EOS_SCRIPT } from './scripts/arista-eos.script';
 import { MIKROTIK_ROUTEROS_SCRIPT } from './scripts/mikrotik-routeros.script';
+import { EXTREME_EXOS_SCRIPT } from './scripts/extreme-exos.script';
+import { HUAWEI_VRP_SCRIPT } from './scripts/huawei-vrp.script';
+import { ARUBA_AOSCX_SCRIPT } from './scripts/aruba-aoscx.script';
+import { DELL_OS10_SCRIPT } from './scripts/dell-os10.script';
+import { DLINK_SCRIPT } from './scripts/dlink.script';
+import { FORTINET_SCRIPT } from './scripts/fortinet.script';
+import { UBIQUITI_SCRIPT } from './scripts/ubiquiti.script';
+import { NETGEAR_SCRIPT } from './scripts/netgear.script';
+import { ZYXEL_SCRIPT } from './scripts/zyxel.script';
 
 const SCRIPTS: Record<string, VendorCliScript> = {
   'cisco-ios': CISCO_IOS_SCRIPT,
   'juniper-junos': JUNIPER_JUNOS_SCRIPT,
   'arista-eos': ARISTA_EOS_SCRIPT,
   'mikrotik-routeros': MIKROTIK_ROUTEROS_SCRIPT,
+  'extreme-exos': EXTREME_EXOS_SCRIPT,
+  'huawei-vrp': HUAWEI_VRP_SCRIPT,
+  'aruba-aoscx': ARUBA_AOSCX_SCRIPT,
+  'dell-os10': DELL_OS10_SCRIPT,
+  dlink: DLINK_SCRIPT,
+  fortinet: FORTINET_SCRIPT,
+  ubiquiti: UBIQUITI_SCRIPT,
+  netgear: NETGEAR_SCRIPT,
+  zyxel: ZYXEL_SCRIPT,
 };
 
 const vendorName = process.argv[2] ?? 'cisco-ios';

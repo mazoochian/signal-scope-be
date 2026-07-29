@@ -40,6 +40,24 @@ export class DeviceControlController {
     private readonly workers: DeviceWorkerRegistryService,
   ) {}
 
+  @Get('vendor-profiles')
+  @Permission('device-control', 'read')
+  async listVendorProfiles() {
+    return this.connections.listVendorProfiles();
+  }
+
+  @Get(':deviceId/connection')
+  @Permission('device-control', 'read')
+  async getConnection(@Param('deviceId') deviceId: string) {
+    const id = Number(deviceId);
+    const device = await this.connections.getDevice(id);
+    const [target, credentials] = await Promise.all([
+      this.connections.getPrimaryTarget(id),
+      this.connections.getStoredCredentialKinds(id),
+    ]);
+    return { device, target, credentials };
+  }
+
   @Post(':deviceId/vendor-profile')
   @Permission('device-control', 'manage')
   async setVendorProfile(@Param('deviceId') deviceId: string, @Body() dto: SetVendorProfileDto) {

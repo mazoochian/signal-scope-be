@@ -97,6 +97,22 @@ export class DeviceConnectionService {
     );
   }
 
+  /** Credential kinds stored for a device, never the decrypted secret — the FE's connection-status view needs to know "is an SSH password on file" without ever seeing it. */
+  async getStoredCredentialKinds(deviceId: number): Promise<{ kind: string; username: string | null; rotatedAt: Date | null }[]> {
+    const { rows } = await this.db.query<{ kind: string; username: string | null; rotated_at: Date | null }>(
+      `SELECT kind, username, rotated_at FROM device_credentials WHERE device_id = $1 AND is_active = true ORDER BY kind`,
+      [deviceId],
+    );
+    return rows.map((r) => ({ kind: r.kind, username: r.username, rotatedAt: r.rotated_at }));
+  }
+
+  async listVendorProfiles(): Promise<{ id: string; displayName: string; defaultTransport: string; supportsCandidateConfig: boolean }[]> {
+    const { rows } = await this.db.query<{ id: string; display_name: string; default_transport: string; supports_candidate_config: boolean }>(
+      `SELECT id, display_name, default_transport, supports_candidate_config FROM vendor_profiles ORDER BY display_name`,
+    );
+    return rows.map((r) => ({ id: r.id, displayName: r.display_name, defaultTransport: r.default_transport, supportsCandidateConfig: r.supports_candidate_config }));
+  }
+
   async setVendorProfile(deviceId: number, vendorProfileId: string, deviceClass: string): Promise<void> {
     await this.db.query(`UPDATE devices SET vendor_profile_id = $2, device_class = $3 WHERE id = $1`, [
       deviceId,

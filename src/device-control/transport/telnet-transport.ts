@@ -110,6 +110,15 @@ export class TelnetCliTransport implements CliChannel {
 
   waitForMatch(patterns: RegExp[], timeoutMs = DEFAULT_PROMPT_TIMEOUT_MS): Promise<{ matched: RegExp; text: string }> {
     return new Promise((resolve, reject) => {
+      // See ssh-transport.ts's waitForMatch for why interval/timeout must
+      // be declared (not just assigned) before tryMatch: the immediate
+      // synchronous call below throws a TDZ ReferenceError on any prompt
+      // that's already in the buffer, which the caller was silently
+      // turning into `ok: false` — the same bug, same fix, copy-pasted
+      // into this transport too.
+      let interval: ReturnType<typeof setInterval> | undefined;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+
       const tryMatch = (): boolean => {
         for (const p of patterns) {
           if (p.test(this.buffer)) {
@@ -126,8 +135,8 @@ export class TelnetCliTransport implements CliChannel {
 
       if (tryMatch()) return;
 
-      const interval = setInterval(tryMatch, 100);
-      const timeout = setTimeout(() => {
+      interval = setInterval(tryMatch, 100);
+      timeout = setTimeout(() => {
         clearInterval(interval);
         reject(new Error(`Timed out waiting for prompt match. Buffer so far: ${JSON.stringify(this.buffer.slice(-300))}`));
       }, timeoutMs);

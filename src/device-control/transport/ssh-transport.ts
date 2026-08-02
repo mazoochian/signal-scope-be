@@ -77,6 +77,18 @@ export class SshCliTransport implements CliChannel {
 
   waitForMatch(patterns: RegExp[], timeoutMs = DEFAULT_PROMPT_TIMEOUT_MS): Promise<{ matched: RegExp; text: string }> {
     return new Promise((resolve, reject) => {
+      // `interval`/`timeout` must be declared before `tryMatch` can
+      // reference them: tryMatch() is called synchronously below (a prompt
+      // already sitting in the buffer resolves immediately, with neither
+      // timer ever created), and referencing a `const` declared further
+      // down throws a TDZ ReferenceError from inside the very first call.
+      // That's not hypothetical — it happened on every real CLI round
+      // trip, which is why every SSH/Telnet-based device-control test
+      // failed with a bare `ok: false` while the SNMP tests (which never
+      // hit this code path) passed.
+      let interval: ReturnType<typeof setInterval> | undefined;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+
       const tryMatch = (): boolean => {
         for (const p of patterns) {
           if (p.test(this.buffer)) {
@@ -93,8 +105,8 @@ export class SshCliTransport implements CliChannel {
 
       if (tryMatch()) return;
 
-      const interval = setInterval(tryMatch, 100);
-      const timeout = setTimeout(() => {
+      interval = setInterval(tryMatch, 100);
+      timeout = setTimeout(() => {
         clearInterval(interval);
         reject(new Error(`Timed out waiting for prompt match. Buffer so far: ${JSON.stringify(this.buffer.slice(-300))}`));
       }, timeoutMs);

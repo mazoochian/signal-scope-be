@@ -1,16 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { DbService } from '../db/db.service';
 import { series } from '../common/chart-utils';
+import { CreateDeviceDto } from './dto/create-device.dto';
 
 export interface DeviceRecord {
   id: number; name: string; ip: string; vendor: string; model: string; role: string;
   site: string; status: string; cpu: number; mem: number; up: string; icon: string;
 }
 
-export interface CreateDeviceDto {
-  name: string; ip: string; vendor: string; model: string;
-  role: string; site: string; icon: string;
-}
+export { CreateDeviceDto };
 
 @Injectable()
 export class DevicesService {

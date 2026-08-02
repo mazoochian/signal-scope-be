@@ -7,8 +7,6 @@ import {
   Param,
   Post,
   Req,
-  UsePipes,
-  ValidationPipe,
 } from '@nestjs/common';
 import { Permission } from '../auth/guards/permission.decorator';
 import { AdapterRegistryService } from './adapters/adapter-registry.service';
@@ -28,7 +26,6 @@ interface AuthedRequest {
 }
 
 @Controller('device-control')
-@UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }))
 export class DeviceControlController {
   constructor(
     private readonly adapters: AdapterRegistryService,

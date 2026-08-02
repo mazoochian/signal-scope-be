@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Put, Delete, Body, Param } from '@nestjs/common';
 import { SlaService } from './sla.service';
 import { Permission } from '../auth/guards/permission.decorator';
+import { CreateSlaParameterDto, UpdateSlaParameterDto } from './dto/sla-parameter.dto';
 
 @Controller('sla')
 export class SlaController {
@@ -12,11 +13,11 @@ export class SlaController {
 
   @Post('parameters')
   @Permission('sla', 'write')
-  create(@Body() dto: any) { return this.svc.create(dto); }
+  create(@Body() dto: CreateSlaParameterDto) { return this.svc.create(dto); }
 
   @Put('parameters/:id')
   @Permission('sla', 'write')
-  update(@Param('id') id: string, @Body() dto: any) {
+  update(@Param('id') id: string, @Body() dto: UpdateSlaParameterDto) {
     return this.svc.update(Number(id), dto);
   }
 

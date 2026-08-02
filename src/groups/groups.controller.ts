@@ -3,6 +3,7 @@ import {
 } from '@nestjs/common';
 import { GroupsService, CreateGroupDto, UpdateGroupDto } from './groups.service';
 import { Permission } from '../auth/guards/permission.decorator';
+import { AddGroupMemberDto } from './dto/group.dto';
 
 @Controller('groups')
 export class GroupsController {
@@ -34,7 +35,7 @@ export class GroupsController {
   @Permission('groups', 'write')
   addMember(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { userId: number },
+    @Body() body: AddGroupMemberDto,
   ) { return this.groupsService.addMember(id, body.userId); }
 
   @Delete(':id/members/:userId')

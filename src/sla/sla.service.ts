@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { DbService } from '../db/db.service';
+import { CreateSlaParameterDto, UpdateSlaParameterDto } from './dto/sla-parameter.dto';
 
 export interface SlaParameter {
   id: number;
@@ -29,7 +30,7 @@ export class SlaService {
     return rows;
   }
 
-  async create(dto: Omit<SlaParameter, 'id'>): Promise<SlaParameter> {
+  async create(dto: CreateSlaParameterDto): Promise<SlaParameter> {
     const { rows } = await this.db.query<SlaParameter>(
       `INSERT INTO sla_parameters
          (name, metric, target_value, operator, scope_type, scope_value, enabled)
@@ -39,7 +40,7 @@ export class SlaService {
     return rows[0];
   }
 
-  async update(id: number, dto: Partial<Omit<SlaParameter, 'id'>>): Promise<SlaParameter> {
+  async update(id: number, dto: UpdateSlaParameterDto): Promise<SlaParameter> {
     const { rows } = await this.db.query<SlaParameter>(
       `UPDATE sla_parameters SET
          name         = COALESCE($2, name),

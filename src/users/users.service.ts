@@ -1,6 +1,7 @@
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { DbService } from '../db/db.service';
+import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
 
 export interface UserRecord {
   id: number;
@@ -33,24 +34,7 @@ export interface AccessGrantDto {
   permission: string;
 }
 
-export interface CreateUserDto {
-  email: string;
-  password?: string;
-  firstName?: string;
-  lastName?: string;
-  age?: number;
-  role?: string;
-}
-
-export interface UpdateUserDto {
-  firstName?: string;
-  lastName?: string;
-  age?: number;
-  avatarUrl?: string;
-  role?: string;
-  isActive?: boolean;
-  password?: string;
-}
+export { CreateUserDto, UpdateUserDto };
 
 @Injectable()
 export class UsersService {

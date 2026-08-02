@@ -1,5 +1,6 @@
 import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { DbService } from '../db/db.service';
+import { CreateGroupDto, UpdateGroupDto } from './dto/group.dto';
 
 export interface GroupDto {
   id: number;
@@ -17,17 +18,7 @@ export interface GroupMemberDto {
   lastName: string | null;
 }
 
-export interface CreateGroupDto {
-  name: string;
-  description?: string;
-  role?: string;
-}
-
-export interface UpdateGroupDto {
-  name?: string;
-  description?: string;
-  role?: string;
-}
+export { CreateGroupDto, UpdateGroupDto };
 
 @Injectable()
 export class GroupsService {

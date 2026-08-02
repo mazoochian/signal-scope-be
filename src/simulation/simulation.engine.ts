@@ -25,6 +25,35 @@ function clamp(min: number, max: number, v: number) {
   return Math.min(max, Math.max(min, v));
 }
 
+/**
+ * Same Ornstein-Uhlenbeck mean-reversion model as the per-device metrics
+ * above, factored out so other simulated time series (interface
+ * utilization, WAN/flow aggregates — see SimulationService) evolve with
+ * the same "settles near a baseline, drifts for tens of seconds" shape
+ * instead of being independently-random per read. Each call advances and
+ * returns the walker's new value; `targetMultiplier` lets the caller shift
+ * the mean-reversion target on the fly (e.g. to react to a device's
+ * current load) without re-seeding.
+ */
+export function createOuWalker(seed: number, opts: { base: number; amp: number; min?: number; max?: number }) {
+  const rng = lcg(seed);
+  let value = opts.base;
+  const min = opts.min ?? 0;
+  const max = opts.max ?? Number.POSITIVE_INFINITY;
+  return (targetMultiplier = 1): number => {
+    const target = opts.base * targetMultiplier;
+    value = clamp(min, max, value + THETA * (target - value) + (rng() - 0.5) * opts.amp * NOISE_SCALE);
+    return value;
+  };
+}
+
+/** Cheap string hash for deriving stable per-entity seeds from a name/id. */
+export function seedFromString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
 const ROLE_DEFAULTS: Record<DeviceRole, Omit<DeviceProfile, 'id' | 'name' | 'role' | 'site' | 'status'>> = {
   'edge-router': {
     cpuBase: 34, cpuAmp: 22,
@@ -219,6 +248,27 @@ export class SimulationEngine {
         { label: '95th %ile', value: `${p95.toFixed(1)} Gbps`,     color: 'foreground' },
       ],
     };
+  }
+
+  /** Single-point current WAN aggregate (for periodic persistence — see getWanSeries() for the charted history version). */
+  getWanCurrent() {
+    const edges  = Array.from(this.states.values()).filter((s) => s.profile.role === 'edge-router');
+    const active = edges.filter((r) => r.profile.status !== 'down');
+    const ingressGbps   = edges.reduce((s, r) => s + r.current.ingressGbps, 0);
+    const egressGbps    = edges.reduce((s, r) => s + r.current.egressGbps, 0);
+    const latencyMs     = active.reduce((s, r) => s + r.current.latencyMs, 0) / Math.max(active.length, 1);
+    const packetLossPct = active.reduce((s, r) => s + r.current.packetLossPct, 0) / Math.max(active.length, 1);
+    return {
+      ingressGbps: +ingressGbps.toFixed(4),
+      egressGbps:  +egressGbps.toFixed(4),
+      latencyMs:   +latencyMs.toFixed(3),
+      packetLossPct: +packetLossPct.toFixed(5),
+    };
+  }
+
+  /** Total ingress across every non-down device — used to scale the synthetic flow-stats aggregate to overall simulated traffic level. */
+  getTotalIngressGbps(): number {
+    return Array.from(this.states.values()).reduce((s, r) => s + r.current.ingressGbps, 0);
   }
 
   getKpis() {

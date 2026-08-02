@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { Response } from 'express';
@@ -6,6 +6,8 @@ import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly jwtService: JwtService,
     private readonly usersService: UsersService,
@@ -13,10 +15,19 @@ export class AuthService {
 
   async login(email: string, password: string) {
     const user = await this.usersService.findByEmail(email);
-    if (!user || !user.passwordHash) throw new UnauthorizedException('Invalid credentials');
+    if (!user || !user.passwordHash) {
+      this.logger.warn(`Failed login attempt for ${email} (no such user or no password set)`);
+      throw new UnauthorizedException('Invalid credentials');
+    }
     const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) throw new UnauthorizedException('Invalid credentials');
-    if (!user.isActive) throw new UnauthorizedException('Account disabled');
+    if (!valid) {
+      this.logger.warn(`Failed login attempt for ${email} (bad password)`);
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    if (!user.isActive) {
+      this.logger.warn(`Failed login attempt for ${email} (account disabled)`);
+      throw new UnauthorizedException('Account disabled');
+    }
     const token = this.signToken(user);
     return { token, user: this.usersService.toDto(user) };
   }

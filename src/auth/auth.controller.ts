@@ -9,8 +9,10 @@ import {
   Query,
   Req,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { OidcService } from '../oidc/oidc.service';
 import { Public } from './guards/public.decorator';
@@ -32,8 +34,13 @@ export class AuthController {
     }
   }
 
+  // Strict per-IP rate limit (5 attempts / 15 min, see ThrottlerModule.forRoot
+  // in app.module.ts) — login previously had no throttling at all, so bcrypt
+  // cost 10 was the only thing slowing down credential stuffing / brute force
+  // (AUDIT-REPORT.md H3). Scoped to just this route, not the whole API.
   @Post('login')
   @Public()
+  @UseGuards(ThrottlerGuard)
   @HttpCode(200)
   async login(
     @Body() body: { email: string; password: string },

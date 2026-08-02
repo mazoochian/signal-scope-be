@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { AppController } from './app.controller';
@@ -32,6 +33,11 @@ import { DeviceControlModule } from './device-control/device-control.module';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
+    // Registered app-wide (ThrottlerModule marks itself @Global()) but only
+    // actually enforced where @UseGuards(ThrottlerGuard) is applied — see
+    // AuthController's login route (AUDIT-REPORT.md H3). Everything else is
+    // unaffected; this is not a blanket API rate limit.
+    ThrottlerModule.forRoot([{ ttl: 15 * 60 * 1000, limit: 5 }]),
     DbModule,
     SimulationModule,
     HostMetricsModule,

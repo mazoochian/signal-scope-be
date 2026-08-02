@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { DbService } from '../db/db.service';
-import { series } from '../common/chart-utils';
 
 @Injectable()
 export class AlertsService {
@@ -56,20 +55,47 @@ export class AlertsService {
     const order = ['Critical', 'Major', 'Minor', 'Warning', 'Info'];
     const countMap = Object.fromEntries(rows.map((r) => [r.severity, Number(r.n)]));
 
+    // Real hourly alert-fired counts over the last 24h — was a fully
+    // synthetic sine-wave sparkline (AUDIT-REPORT.md L1's `series()` call).
+    // alerts.fired_at is real and always populated, so this needed no new
+    // data source, just a query.
+    const { rows: volumeRows } = await this.db.query<{ bucket: Date; n: string }>(`
+      SELECT date_trunc('hour', fired_at) AS bucket, COUNT(*) AS n
+      FROM alerts
+      WHERE fired_at > now() - INTERVAL '24 hours'
+      GROUP BY bucket ORDER BY bucket
+    `);
+    const volumeByHour = new Map(volumeRows.map((r) => [r.bucket.toISOString().slice(0, 13), Number(r.n)]));
+    const volumeChart: number[] = [];
+    for (let h = 23; h >= 0; h--) {
+      const bucket = new Date(Date.now() - h * 3600_000).toISOString().slice(0, 13);
+      volumeChart.push(volumeByHour.get(bucket) ?? 0);
+    }
+
+    // Real root-cause chain: alert-evaluator.ts (see fireAlert()) already
+    // marks a device-down alert ROOT and every other currently-open alert
+    // CHILD when it fires — a real, if coarse, correlation model that was
+    // never actually surfaced; this endpoint returned a fixed five-line
+    // fictional BGP scenario regardless of what was really open
+    // (AUDIT-REPORT.md L1).
+    const { rows: chainRows } = await this.db.query<{
+      title: string; device_name: string | null; rule: string | null; root_cause: string;
+    }>(`
+      SELECT title, device_name, rule, root_cause FROM alerts
+      WHERE cleared_at IS NULL AND root_cause IN ('ROOT', 'CHILD')
+      ORDER BY (root_cause = 'ROOT') DESC, fired_at ASC
+      LIMIT 6
+    `);
+    const rootCauseChain = chainRows.map((r) => `${r.rule ?? r.device_name ?? '—'}::${r.title}`);
+
     return {
       severityCounts: order.map((label) => ({
         label,
         n:     countMap[label] ?? 0,
         color: colorMap[label] ?? 'text-muted-foreground',
       })),
-      volumeChart: series(60, 88, 30, 22),
-      rootCauseChain: [
-        'BGP::Neighbor down · AS65001',
-        'ICMP::Loss 100%',
-        'Service::Internet-Access degraded',
-        'Tunnel::VPN-Site-A down',
-        'SLA::ISP-A breach 13s',
-      ],
+      volumeChart,
+      rootCauseChain,
     };
   }
 

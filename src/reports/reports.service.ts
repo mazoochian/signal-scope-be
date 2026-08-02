@@ -79,16 +79,16 @@ export class ReportsService {
       SELECT
         i.name AS iface_name,
         d.name AS device_name,
-        ROUND(AVG(m.rx_mbps)::numeric, 2)::text  AS avg_in,
-        ROUND(AVG(m.tx_mbps)::numeric, 2)::text  AS avg_out,
-        ROUND(MAX(m.rx_mbps)::numeric, 2)::text  AS peak_in,
-        ROUND(MAX(m.tx_mbps)::numeric, 2)::text  AS peak_out
+        ROUND(AVG(m.in_mbps)::numeric, 2)::text  AS avg_in,
+        ROUND(AVG(m.out_mbps)::numeric, 2)::text  AS avg_out,
+        ROUND(MAX(m.in_mbps)::numeric, 2)::text  AS peak_in,
+        ROUND(MAX(m.out_mbps)::numeric, 2)::text  AS peak_out
       FROM interfaces i
       JOIN devices d ON d.id = i.device_id
       JOIN interface_metrics m ON m.interface_id = i.id
       WHERE m.time > now() - INTERVAL '${interval}'
       GROUP BY i.id, i.name, d.name
-      ORDER BY AVG(m.rx_mbps) + AVG(m.tx_mbps) DESC
+      ORDER BY AVG(m.in_mbps) + AVG(m.out_mbps) DESC
       LIMIT 20
     `);
 
@@ -133,21 +133,50 @@ export class ReportsService {
     const major    = Number(bySev.find((r) => r.severity === 'Major')?.n ?? 0);
     const minor    = Number(bySev.find((r) => r.severity === 'Minor')?.n ?? 0);
 
+    // Mean time to resolve: real average of (cleared_at - fired_at) over
+    // alerts that both fired and cleared within the requested window. Was
+    // hardcoded to 0 unconditionally (AUDIT-REPORT.md L1) — `alerts` has
+    // carried real fired_at/cleared_at columns the whole time, this just
+    // hadn't been wired up.
+    const { rows: mttrRows } = await this.db.query<{ avg_seconds: string | null }>(`
+      SELECT AVG(EXTRACT(EPOCH FROM (cleared_at - fired_at))) AS avg_seconds
+      FROM alerts
+      WHERE cleared_at IS NOT NULL AND fired_at > now() - INTERVAL '${interval}'
+    `);
+    const mttrSeconds = Number(mttrRows[0]?.avg_seconds ?? 0);
+
     return {
       summary: { total, critical, major, minor },
       bySeverity: bySev.map((r) => ({ severity: r.severity, count: Number(r.n) })),
       bySite: bySite.map((r) => ({ site: r.site, count: Number(r.n) })),
       topDevices: topDevices.map((r) => ({ name: r.device_name, alertCount: Number(r.n) })),
-      mttr: 0,
+      mttr: Math.round(mttrSeconds / 60), // minutes — matches the unit the reports UI already labels this as
     };
   }
 
-  async availability() {
+  async availability(range: Range = '7d') {
+    const interval = rangeInterval(range);
+
+    // Real per-device availability: the share of device_metrics samples in
+    // the window where the device wasn't flat-lined down (the simulation
+    // engine reports packet_loss_pct=100/latency=999 for a down device —
+    // see simulation.engine.ts's ouStep). Was a hardcoded status→number
+    // lookup (up→100/warn→95/down→0), the same value regardless of how
+    // long a device had actually been in that state (AUDIT-REPORT.md L1).
+    // Falls back to that same status-based estimate only for a device with
+    // no samples yet in the window (e.g. right after boot).
     const { rows } = await this.db.query<{
-      name: string; site: string; status: string;
+      name: string; site: string; status: string; availability: string | null;
     }>(`
-      SELECT d.name, COALESCE(s.name, '—') AS site, d.status
-      FROM devices d LEFT JOIN sites s ON s.id = d.site_id
+      SELECT d.name, COALESCE(s.name, '—') AS site, d.status,
+             m.pct AS availability
+      FROM devices d
+      LEFT JOIN sites s ON s.id = d.site_id
+      LEFT JOIN LATERAL (
+        SELECT 100.0 * COUNT(*) FILTER (WHERE packet_loss_pct < 50) / NULLIF(COUNT(*), 0) AS pct
+        FROM device_metrics
+        WHERE device_id = d.id AND time > now() - INTERVAL '${interval}'
+      ) m ON true
       ORDER BY d.name
     `);
 
@@ -156,7 +185,9 @@ export class ReportsService {
         name: r.name,
         site: r.site,
         status: r.status,
-        availability: r.status === 'up' ? 100 : r.status === 'warn' ? 95 : 0,
+        availability: r.availability != null
+          ? +Number(r.availability).toFixed(2)
+          : (r.status === 'up' ? 100 : r.status === 'warn' ? 95 : 0),
       })),
     };
   }

@@ -19,7 +19,7 @@ export class ReportsController {
       case 'device-health':         return this.svc.deviceHealth(r);
       case 'interface-utilization': return this.svc.interfaceUtilization(r);
       case 'alert-summary':         return this.svc.alertSummary(r);
-      case 'availability':          return this.svc.availability();
+      case 'availability':          return this.svc.availability(r);
       default: return { error: 'Unknown report type' };
     }
   }

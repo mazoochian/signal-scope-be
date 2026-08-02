@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { DbService } from '../db/db.service';
-import { series } from '../common/chart-utils';
 
 export interface InterfaceFilter {
   deviceId?: number;
@@ -42,25 +41,42 @@ export class InterfacesService {
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
+    // Latest interface_metrics sample per interface (utilization/in/out/errors)
+    // — see AUDIT-REPORT.md L1 and simulation.service.ts's
+    // persistInterfaceMetrics(): this table used to be schema-only with no
+    // writer, so this used to fall back to two hardcoded lookup arrays
+    // indexed by row position. A LATERAL join for "most recent row" is the
+    // same pattern reports.service.ts already uses for device_metrics.
     const { rows } = await this.db.query<{
       id: number; name: string; description: string | null;
       vlan: string | null; duplex: string; speed: string | null;
       status: string; admin_status: string; device_id: number;
+      in_mbps: string | null; out_mbps: string | null;
+      utilization_pct: string | null; error_count: number | null;
+      trend: (number | null)[] | null;
     }>(
       `SELECT i.id, i.name, i.description, i.vlan, i.duplex, i.speed,
-              i.status, i.admin_status, i.device_id
+              i.status, i.admin_status, i.device_id,
+              latest.in_mbps, latest.out_mbps, latest.utilization_pct, latest.error_count,
+              recent.trend
        FROM interfaces i
+       LEFT JOIN LATERAL (
+         SELECT in_mbps, out_mbps, utilization_pct, error_count
+         FROM interface_metrics WHERE interface_id = i.id ORDER BY time DESC LIMIT 1
+       ) latest ON true
+       LEFT JOIN LATERAL (
+         SELECT array_agg(utilization_pct ORDER BY time) AS trend FROM (
+           SELECT utilization_pct, time FROM interface_metrics
+           WHERE interface_id = i.id ORDER BY time DESC LIMIT 20
+         ) t
+       ) recent ON true
        ${where}
        ORDER BY i.name`,
       params,
     );
 
-    const UTIL   = [22, 41, 6, 78, 12, 91, 4, 67, 0, 33, 51, 18, 28, 96];
-    const ERRORS = [0,  0,  0, 2,  0,  0,  0, 17, 0, 3,  0,  0,  0,  128];
-
-    return rows.map((r, i) => {
-      const util = r.admin_status === 'down' || r.status === 'down' ? 0 : (UTIL[i % UTIL.length] ?? 20);
-      const errs = ERRORS[i % ERRORS.length] ?? 0;
+    return rows.map((r) => {
+      const util = r.admin_status === 'down' || r.status === 'down' ? 0 : Number(r.utilization_pct ?? 0);
       return {
         id:          r.id,
         name:        r.name,
@@ -69,21 +85,25 @@ export class InterfacesService {
         vlan:        r.vlan        ?? null,
         duplex:      r.duplex,
         speed:       r.speed       ?? '1G',
-        inMbps:      (util * 10.2).toFixed(1),
-        outMbps:     (util * 8.4).toFixed(1),
-        errs,
+        inMbps:      Number(r.in_mbps  ?? 0).toFixed(1),
+        outMbps:     Number(r.out_mbps ?? 0).toFixed(1),
+        errs:        r.error_count ?? 0,
         util,
         status:      r.status,
         adminStatus: r.admin_status,
-        trend:       series(20, r.name.length * 3, 50, 25),
+        // No metrics yet (e.g. right after boot, before the first
+        // simulation persistence tick) → flat at the current utilization
+        // rather than an empty/undefined chart.
+        trend: (r.trend?.filter((v): v is number => v != null).map(Number)) ?? [],
       };
     });
   }
 
   async getSummary(deviceId?: number) {
     const scope = deviceId
-      ? `device_id = ${deviceId}`
+      ? `device_id = $1`
       : `device_id = (SELECT id FROM devices WHERE name = 'core-sw-01' LIMIT 1)`;
+    const params = deviceId ? [deviceId] : [];
 
     const { rows } = await this.db.query<{
       total: string; up: string; error_down: string; admin_down: string; warn: string;
@@ -96,7 +116,22 @@ export class InterfacesService {
         COUNT(*) FILTER (WHERE admin_status = 'up' AND status NOT IN ('up','down')) AS warn
       FROM interfaces
       WHERE ${scope}
-    `);
+    `, params);
+
+    // Real current aggregate throughput across the in-scope interfaces —
+    // was a hardcoded '14.8 Gbps' string (AUDIT-REPORT.md L1).
+    const { rows: throughputRows } = await this.db.query<{ total_mbps: string | null }>(`
+      SELECT SUM(latest.in_mbps + latest.out_mbps) AS total_mbps
+      FROM interfaces i
+      LEFT JOIN LATERAL (
+        SELECT in_mbps, out_mbps FROM interface_metrics
+        WHERE interface_id = i.id ORDER BY time DESC LIMIT 1
+      ) latest ON true
+      WHERE i.${scope}
+    `, params);
+    const totalMbps = Number(throughputRows[0]?.total_mbps ?? 0);
+    const throughput = totalMbps >= 1000 ? `${(totalMbps / 1000).toFixed(1)} Gbps` : `${totalMbps.toFixed(0)} Mbps`;
+
     return {
       total:     Number(rows[0]?.total      ?? 0),
       up:        Number(rows[0]?.up         ?? 0),
@@ -104,7 +139,7 @@ export class InterfacesService {
       adminDown: Number(rows[0]?.admin_down ?? 0),
       warn:      Number(rows[0]?.warn       ?? 0),
       errored:   Number(rows[0]?.error_down ?? 0), // kept for backward compat
-      throughput: '14.8 Gbps',
+      throughput,
     };
   }
 

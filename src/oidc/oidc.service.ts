@@ -208,7 +208,14 @@ export class OidcService {
     if (!userInfoRes.ok) throw new BadRequestException('Userinfo fetch failed');
     const info = await userInfoRes.json();
 
-    const user = await this.findOrCreateOidcUser(providerId, info.sub, info.email, info.name);
+    // AUDIT-REPORT.md M3: auto-linking to an existing local account by
+    // email is only safe if the IdP actually verified that email address.
+    // Without this, any IdP that lets a user set an arbitrary/unverified
+    // email (which is admin-configurable at runtime, so the least
+    // trustworthy configured provider sets the real bar) lets an attacker
+    // register e.g. admin@yourcompany.com there, sign in through it, and
+    // silently inherit the existing local admin account's role.
+    const user = await this.findOrCreateOidcUser(providerId, info.sub, info.email, info.name, info.email_verified === true);
     const token = this.jwtService.sign({ sub: user.id, email: user.email, role: user.role });
     return { token, user };
   }
@@ -235,11 +242,17 @@ export class OidcService {
     if (Date.now() / 1000 - authDate > 86400) throw new UnauthorizedException('Telegram auth expired');
 
     const email = `tg_${fields.id}@telegram.local`;
+    // Safe to treat as "verified" here even though Telegram has no
+    // email_verified concept: this address is synthesized from
+    // `fields.id`, which is itself HMAC-verified above against the bot
+    // token — it isn't attacker-choosable the way an arbitrary OIDC
+    // `email` claim can be, so the M3 spoofing scenario doesn't apply.
     const user = await this.findOrCreateOidcUser(
       providerId,
       fields.id,
       email,
       `${fields.first_name ?? ''} ${fields.last_name ?? ''}`.trim() || fields.username,
+      true,
     );
     const token = this.jwtService.sign({ sub: user.id, email: user.email, role: user.role });
     return { token, user: this.usersService.toDto(user) };
@@ -250,6 +263,7 @@ export class OidcService {
     subject: string,
     email: string,
     displayName: string,
+    emailVerified: boolean,
   ) {
     const { rows: existing } = await this.db.query<{ user_id: number }>(
       'SELECT user_id FROM user_idp_links WHERE provider_id = $1 AND subject = $2',
@@ -260,8 +274,13 @@ export class OidcService {
       if (!user) throw new UnauthorizedException('Linked user not found');
       return user;
     }
-    // Try to find by email first
-    let user = await this.usersService.findByEmail(email);
+    // Only auto-link to an existing local account by email if the IdP
+    // actually verified it (AUDIT-REPORT.md M3) — an unverified email
+    // match here would let a user register the same address at a
+    // permissive IdP and silently inherit an existing account's role.
+    // An unverified email always creates a brand-new account instead
+    // (still 'viewer' role, same as any other fresh signup).
+    let user = emailVerified ? await this.usersService.findByEmail(email) : null;
     if (!user) {
       const [first, ...rest] = (displayName ?? '').split(' ');
       const dto = await this.usersService.create({

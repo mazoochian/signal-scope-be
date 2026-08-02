@@ -169,6 +169,10 @@ export class OidcService {
     stateStore.delete(state);
 
     const provider = await this.getProvider(providerId);
+    // buildAuthorizationUrl checks isEnabled before issuing the state, but a
+    // request started just before an admin disables the provider can still
+    // land here with a still-valid state — check again (AUDIT-REPORT.md M8).
+    if (!provider.isEnabled) throw new UnauthorizedException('Provider disabled');
     const discovery = await this.fetchDiscovery(provider);
 
     const tokenRes = await fetch(discovery.token_endpoint, {
@@ -198,6 +202,10 @@ export class OidcService {
 
   async handleTelegram(providerId: number, data: Record<string, string>) {
     const provider = await this.getProvider(providerId);
+    // There is no state handshake for Telegram login at all, so without this
+    // check, disabling the provider in the admin UI had no effect — login
+    // through it kept working indefinitely (AUDIT-REPORT.md M8).
+    if (!provider.isEnabled) throw new UnauthorizedException('Provider disabled');
     if (!provider.botToken) throw new BadRequestException('No bot token configured');
 
     const { hash, ...fields } = data;

@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   HttpCode,
+  Logger,
   Param,
   Post,
   Query,
@@ -16,10 +17,20 @@ import { Public } from './guards/public.decorator';
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private readonly authService: AuthService,
     private readonly oidcService: OidcService,
-  ) {}
+  ) {
+    if (!process.env.FRONTEND_URL) {
+      this.logger.warn(
+        'FRONTEND_URL is not set — post-OIDC-login redirects will fall back to ' +
+          'http://localhost:3000, which is wrong for any non-local deployment. ' +
+          'Set FRONTEND_URL to the public URL of the frontend.',
+      );
+    }
+  }
 
   @Post('login')
   @Public()

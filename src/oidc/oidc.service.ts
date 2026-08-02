@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import { DbService } from '../db/db.service';
@@ -21,6 +21,22 @@ export interface OidcProvider {
   buttonText: string;
 }
 
+/**
+ * Subset of OidcProvider that is safe to expose to unauthenticated clients
+ * (the login page needs this to render provider buttons). Deliberately
+ * excludes clientSecret and botToken — see AUDIT-REPORT.md finding C2: the
+ * previous public route returned the full record, leaking OAuth client
+ * secrets and Telegram bot tokens to any anonymous visitor.
+ */
+export interface PublicOidcProvider {
+  id: number;
+  name: string;
+  providerType: string;
+  isEnabled: boolean;
+  buttonText: string;
+  botUsername: string | null;
+}
+
 interface DiscoveryDoc {
   authorization_endpoint: string;
   token_endpoint: string;
@@ -34,15 +50,39 @@ const GOOGLE_DISCOVERY = 'https://accounts.google.com/.well-known/openid-configu
 
 @Injectable()
 export class OidcService {
+  private readonly logger = new Logger(OidcService.name);
+
   constructor(
     private readonly db: DbService,
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
-  ) {}
+  ) {
+    if (!process.env.API_PUBLIC_URL) {
+      this.logger.warn(
+        'API_PUBLIC_URL is not set — OIDC redirect_uri will fall back to ' +
+          'http://localhost:4000, which any real identity provider will reject ' +
+          'as a callback URL outside of local development. Set API_PUBLIC_URL to ' +
+          'the public URL of this API.',
+      );
+    }
+  }
 
   async listProviders(): Promise<OidcProvider[]> {
     const { rows } = await this.db.query<any>('SELECT * FROM oidc_providers ORDER BY id');
     return rows.map(this.rowToProvider);
+  }
+
+  /** Public, unauthenticated-safe subset — see PublicOidcProvider. */
+  async listPublicProviders(): Promise<PublicOidcProvider[]> {
+    const providers = await this.listProviders();
+    return providers.map((p) => ({
+      id: p.id,
+      name: p.name,
+      providerType: p.providerType,
+      isEnabled: p.isEnabled,
+      buttonText: p.buttonText,
+      botUsername: p.botUsername,
+    }));
   }
 
   async getProvider(id: number): Promise<OidcProvider> {

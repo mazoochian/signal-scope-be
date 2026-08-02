@@ -15,6 +15,7 @@ import { Request } from 'express';
 import { UsersService, CreateUserDto, UpdateUserDto } from './users.service';
 import { Permission } from '../auth/guards/permission.decorator';
 import { PermissionsService } from '../permissions/permissions.service';
+import { AddGrantDto } from './dto/user.dto';
 
 @Controller('users')
 export class UsersController {
@@ -42,9 +43,17 @@ export class UsersController {
     return this.usersService.toDto(user);
   }
 
+  // Mirrors the superadmin protections on update()/remove(): without this,
+  // any role holding users:write (e.g. admin) could mint a brand-new
+  // superadmin account and log in as it, defeating those protections
+  // entirely (AUDIT-REPORT.md H2).
   @Post()
   @Permission('users', 'write')
-  create(@Body() dto: CreateUserDto) {
+  create(@Body() dto: CreateUserDto, @Req() req: Request) {
+    const me = (req as any).user;
+    if (dto.role === 'superadmin' && me.role !== 'superadmin') {
+      throw new ForbiddenException('Only a superadmin can create a superadmin account');
+    }
     return this.usersService.create(dto);
   }
 
@@ -69,6 +78,12 @@ export class UsersController {
 
     if (target.role === 'superadmin' && me.role !== 'superadmin') {
       throw new ForbiddenException('Superadmin accounts can only be modified by superadmins');
+    }
+
+    // Same escalation this closes on create(): promoting an existing account
+    // to superadmin is equivalent to minting one.
+    if (dto.role === 'superadmin' && me.role !== 'superadmin') {
+      throw new ForbiddenException('Only a superadmin can grant the superadmin role');
     }
 
     return this.usersService.update(id, dto);
@@ -100,7 +115,7 @@ export class UsersController {
   @Permission('users', 'write')
   addGrant(
     @Param('id', ParseIntPipe) id: number,
-    @Body() dto: { resourceType: string; resourceId?: string; permission: string },
+    @Body() dto: AddGrantDto,
   ) {
     return this.usersService.addGrant(id, dto);
   }

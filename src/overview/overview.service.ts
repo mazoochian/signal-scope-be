@@ -89,6 +89,10 @@ export class OverviewService {
       LIMIT 4
     `);
 
+    // trend: same "no health-over-time table for business services"
+    // situation as services.service.ts's identical field — see the
+    // comment there. Left as a synthetic sparkline deliberately, not
+    // silently.
     return rows.map((s, i) => ({
       name:   s.name,
       kind:   s.status,

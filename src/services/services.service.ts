@@ -26,6 +26,13 @@ export class ServicesService {
       depsMap.get(r.service_id)!.push(r.dependency);
     }
 
+    // trend is a synthetic sine-wave sparkline (AUDIT-REPORT.md L1),
+    // deliberately left as-is tonight: `services` only carries current
+    // sla_pct/health_pct/mos/loss/jitter columns, no health-over-time
+    // hypertable exists for business services. Same "needs a new table,
+    // not just a query" situation as telemetry.service.ts's
+    // throughputChart and wireless.service.ts's clientsChart — flagging
+    // rather than silently leaving unexplained.
     return rows.map((s, i) => ({
       name:   s.name,
       owner:  s.owner,

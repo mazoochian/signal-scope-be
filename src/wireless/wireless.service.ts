@@ -58,6 +58,12 @@ export class WirelessService {
     return { clients: '7,214', channelUtil: '42% avg', avgRssi: '-61 dBm', roamsPerMin: '184' };
   }
 
+  // clientsChart is a synthetic sine-wave sparkline (AUDIT-REPORT.md L1)
+  // that's deliberately left as-is tonight: wireless_access_points only
+  // carries a current client_count, there's no client-count-over-time
+  // hypertable anywhere in this schema. A real fix needs a new table plus
+  // a simulation writer for it — see the identical situation flagged in
+  // telemetry.service.ts's getAll(), same reasoning.
   async getAll() {
     const [accessPoints, ssidDistribution] = await Promise.all([
       this.getAccessPoints(),

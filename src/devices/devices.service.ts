@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { DbService } from '../db/db.service';
-import { series } from '../common/chart-utils';
 import { CreateDeviceDto } from './dto/create-device.dto';
 
 export interface DeviceRecord {
@@ -20,13 +19,15 @@ export class DevicesService {
       role: string; site_name: string; status: string; icon: string;
       up_since: Date | null;
       cpu: number | null; mem: number | null;
+      trend: (number | null)[] | null;
     }>(`
       SELECT
         d.id, d.name, d.ip::text AS ip, d.vendor, d.model, d.role,
         COALESCE(s.name, '—') AS site_name,
         d.status, d.icon, d.up_since,
         dm.cpu_pct  AS cpu,
-        dm.mem_pct  AS mem
+        dm.mem_pct  AS mem,
+        recent.trend
       FROM devices d
       LEFT JOIN sites s ON s.id = d.site_id
       LEFT JOIN LATERAL (
@@ -35,6 +36,12 @@ export class DevicesService {
         WHERE device_id = d.id
         ORDER BY time DESC LIMIT 1
       ) dm ON true
+      LEFT JOIN LATERAL (
+        SELECT array_agg(cpu_pct ORDER BY time) AS trend FROM (
+          SELECT cpu_pct, time FROM device_metrics
+          WHERE device_id = d.id ORDER BY time DESC LIMIT 28
+        ) t
+      ) recent ON true
       ORDER BY d.id
     `);
 
@@ -51,7 +58,9 @@ export class DevicesService {
       cpu:    +(r.cpu  ?? 0),
       mem:    +(r.mem  ?? 0),
       up:     r.up_since ? formatUptime(r.up_since) : '0',
-      trend:  series(28, r.name.length * 7, 50, 18),
+      // Real recent CPU history — was a synthetic sine-wave sparkline
+      // seeded off the device name's string length (AUDIT-REPORT.md L1).
+      trend: (r.trend?.filter((v): v is number => v != null).map(Number)) ?? [],
     }));
   }
 

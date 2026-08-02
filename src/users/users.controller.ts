@@ -16,12 +16,14 @@ import { UsersService, CreateUserDto, UpdateUserDto } from './users.service';
 import { Permission } from '../auth/guards/permission.decorator';
 import { PermissionsService } from '../permissions/permissions.service';
 import { AddGrantDto } from './dto/user.dto';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 @Controller('users')
 export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly permissionsService: PermissionsService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   @Get()
@@ -49,12 +51,17 @@ export class UsersController {
   // entirely (AUDIT-REPORT.md H2).
   @Post()
   @Permission('users', 'write')
-  create(@Body() dto: CreateUserDto, @Req() req: Request) {
+  async create(@Body() dto: CreateUserDto, @Req() req: Request) {
     const me = (req as any).user;
     if (dto.role === 'superadmin' && me.role !== 'superadmin') {
       throw new ForbiddenException('Only a superadmin can create a superadmin account');
     }
-    return this.usersService.create(dto);
+    const created = await this.usersService.create(dto);
+    await this.auditLog.record({
+      actorUserId: me.id, actorEmail: me.email, action: 'user.created',
+      targetType: 'user', targetId: created.id, details: { email: created.email, role: created.role },
+    });
+    return created;
   }
 
   // Self-edit bypass: authenticated users can always update their own profile,
@@ -86,7 +93,18 @@ export class UsersController {
       throw new ForbiddenException('Only a superadmin can grant the superadmin role');
     }
 
-    return this.usersService.update(id, dto);
+    const updated = await this.usersService.update(id, dto);
+    // AUDIT-REPORT.md M6 specifically calls out role changes — logged
+    // distinctly from a plain profile edit, and only when the role
+    // actually changed (self-edits of name/avatar never touch role).
+    if (dto.role && dto.role !== target.role) {
+      await this.auditLog.record({
+        actorUserId: me.id, actorEmail: me.email, action: 'user.role_changed',
+        targetType: 'user', targetId: id,
+        details: { email: target.email, fromRole: target.role, toRole: dto.role },
+      });
+    }
+    return updated;
   }
 
   @Delete(':id')
@@ -102,7 +120,12 @@ export class UsersController {
       throw new ForbiddenException('Superadmin accounts can only be deleted by superadmins');
     }
 
-    return this.usersService.remove(id);
+    const result = await this.usersService.remove(id);
+    await this.auditLog.record({
+      actorUserId: me.id, actorEmail: me.email, action: 'user.deleted',
+      targetType: 'user', targetId: id, details: { email: target.email, role: target.role },
+    });
+    return result;
   }
 
   @Get(':id/grants')
@@ -113,16 +136,33 @@ export class UsersController {
 
   @Post(':id/grants')
   @Permission('users', 'write')
-  addGrant(
+  async addGrant(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: AddGrantDto,
+    @Req() req: Request,
   ) {
-    return this.usersService.addGrant(id, dto);
+    const me = (req as any).user;
+    const grant = await this.usersService.addGrant(id, dto);
+    await this.auditLog.record({
+      actorUserId: me.id, actorEmail: me.email, action: 'access_grant.created',
+      targetType: 'user', targetId: id, details: { ...dto },
+    });
+    return grant;
   }
 
   @Delete(':id/grants/:grantId')
   @Permission('users', 'delete')
-  removeGrant(@Param('grantId', ParseIntPipe) grantId: number) {
-    return this.usersService.removeGrant(grantId);
+  async removeGrant(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('grantId', ParseIntPipe) grantId: number,
+    @Req() req: Request,
+  ) {
+    const me = (req as any).user;
+    const result = await this.usersService.removeGrant(grantId);
+    await this.auditLog.record({
+      actorUserId: me.id, actorEmail: me.email, action: 'access_grant.deleted',
+      targetType: 'user', targetId: id, details: { grantId },
+    });
+    return result;
   }
 }

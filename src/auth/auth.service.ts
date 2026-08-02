@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { Response } from 'express';
 import { UsersService } from '../users/users.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 @Injectable()
 export class AuthService {
@@ -11,24 +12,45 @@ export class AuthService {
   constructor(
     private readonly jwtService: JwtService,
     private readonly usersService: UsersService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
-  async login(email: string, password: string) {
+  // AUDIT-REPORT.md M6: login events (success and failure) were only ever
+  // logged to stdout via `this.logger.warn`, never persisted — no way to
+  // answer "who logged in" or "was this account targeted by a brute-force
+  // attempt" after the fact. ipAddress is optional so this stays callable
+  // from anywhere that doesn't have a request object (tests, scripts).
+  async login(email: string, password: string, ipAddress?: string | null) {
     const user = await this.usersService.findByEmail(email);
     if (!user || !user.passwordHash) {
       this.logger.warn(`Failed login attempt for ${email} (no such user or no password set)`);
+      await this.auditLog.record({
+        actorUserId: null, actorEmail: email, action: 'login.failure',
+        details: { reason: 'no_such_user_or_no_password' }, ipAddress,
+      });
       throw new UnauthorizedException('Invalid credentials');
     }
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
       this.logger.warn(`Failed login attempt for ${email} (bad password)`);
+      await this.auditLog.record({
+        actorUserId: user.id, actorEmail: email, action: 'login.failure',
+        details: { reason: 'bad_password' }, ipAddress,
+      });
       throw new UnauthorizedException('Invalid credentials');
     }
     if (!user.isActive) {
       this.logger.warn(`Failed login attempt for ${email} (account disabled)`);
+      await this.auditLog.record({
+        actorUserId: user.id, actorEmail: email, action: 'login.failure',
+        details: { reason: 'account_disabled' }, ipAddress,
+      });
       throw new UnauthorizedException('Account disabled');
     }
     const token = this.signToken(user);
+    await this.auditLog.record({
+      actorUserId: user.id, actorEmail: email, action: 'login.success', ipAddress,
+    });
     return { token, user: this.usersService.toDto(user) };
   }
 

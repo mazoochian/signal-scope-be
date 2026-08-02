@@ -29,6 +29,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
 import { GroupsModule } from './groups/groups.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { DeviceControlModule } from './device-control/device-control.module';
+import { AuditLogModule } from './audit-log/audit-log.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { DeviceControlModule } from './device-control/device-control.module';
     // unaffected; this is not a blanket API rate limit.
     ThrottlerModule.forRoot([{ ttl: 15 * 60 * 1000, limit: 5 }]),
     DbModule,
+    AuditLogModule,
     SimulationModule,
     HostMetricsModule,
     OverviewModule,

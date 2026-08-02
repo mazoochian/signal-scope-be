@@ -22,21 +22,35 @@ import {
   UpdateReportSubscriptionDto,
   UserAlertEmailPrefsDto,
 } from './dto/email-notification.dto';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 @Controller('integrations')
 export class IntegrationsController {
   constructor(
     private readonly svc: IntegrationsService,
     private readonly emailNotifications: EmailNotificationsService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   @Get('email')
   @Permission('integrations', 'read')
   getEmail() { return this.svc.getConfig<EmailConfig>('email'); }
 
+  // AUDIT-REPORT.md M6 names this specifically: read-only access to the
+  // integrations panel is equivalent to owning the SMTP account / bot
+  // (H4), so knowing *who* last changed these credentials matters. Logs
+  // that the config changed, never the secret value itself.
   @Put('email')
   @Permission('integrations', 'write')
-  saveEmail(@Body() body: EmailConfigDto) { return this.svc.saveConfig('email', body); }
+  async saveEmail(@Body() body: EmailConfigDto, @Req() req: Request) {
+    const saved = await this.svc.saveConfig('email', body);
+    const me = (req as any).user;
+    await this.auditLog.record({
+      actorUserId: me.id, actorEmail: me.email, action: 'integration.credentials_changed',
+      targetType: 'integration', targetId: 'email',
+    });
+    return saved;
+  }
 
   @Post('email/test')
   @Permission('integrations', 'execute')
@@ -52,7 +66,15 @@ export class IntegrationsController {
 
   @Put('telegram')
   @Permission('integrations', 'write')
-  saveTelegram(@Body() body: TelegramConfigDto) { return this.svc.saveConfig('telegram', body); }
+  async saveTelegram(@Body() body: TelegramConfigDto, @Req() req: Request) {
+    const saved = await this.svc.saveConfig('telegram', body);
+    const me = (req as any).user;
+    await this.auditLog.record({
+      actorUserId: me.id, actorEmail: me.email, action: 'integration.credentials_changed',
+      targetType: 'integration', targetId: 'telegram',
+    });
+    return saved;
+  }
 
   @Post('telegram/test')
   @Permission('integrations', 'execute')
@@ -68,7 +90,15 @@ export class IntegrationsController {
 
   @Put('slack')
   @Permission('integrations', 'write')
-  saveSlack(@Body() body: SlackConfigDto) { return this.svc.saveConfig('slack', body); }
+  async saveSlack(@Body() body: SlackConfigDto, @Req() req: Request) {
+    const saved = await this.svc.saveConfig('slack', body);
+    const me = (req as any).user;
+    await this.auditLog.record({
+      actorUserId: me.id, actorEmail: me.email, action: 'integration.credentials_changed',
+      targetType: 'integration', targetId: 'slack',
+    });
+    return saved;
+  }
 
   @Post('slack/test')
   @Permission('integrations', 'execute')

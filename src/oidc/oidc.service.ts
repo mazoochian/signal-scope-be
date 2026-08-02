@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import { DbService } from '../db/db.service';
 import { UsersService } from '../users/users.service';
+import { getRedisConnection } from '../device-control/queue/redis-connection';
 
 export interface OidcProvider {
   id: number;
@@ -43,8 +44,18 @@ interface DiscoveryDoc {
   userinfo_endpoint: string;
 }
 
-// In-memory OIDC state store (for dev; use Redis in production)
-const stateStore = new Map<string, { providerId: number; expiresAt: number }>();
+// OIDC CSRF `state` store, backed by Redis (AUDIT-REPORT.md M4). Used to be
+// a module-level Map: never pruned (unbounded growth for every
+// authorization request started and never completed), and broken entirely
+// once the API runs more than one replica, since a callback can land on a
+// different instance than the one that issued the state. Redis's own key
+// expiry (`EX`) handles pruning; any replica can validate any other
+// replica's state.
+const STATE_TTL_SECONDS = 10 * 60;
+
+function stateKey(state: string): string {
+  return `oidc:state:${state}`;
+}
 
 const GOOGLE_DISCOVERY = 'https://accounts.google.com/.well-known/openid-configuration';
 
@@ -150,7 +161,7 @@ export class OidcService {
     if (!provider.isEnabled) throw new BadRequestException('Provider disabled');
     const discovery = await this.fetchDiscovery(provider);
     const state = crypto.randomBytes(16).toString('hex');
-    stateStore.set(state, { providerId, expiresAt: Date.now() + 10 * 60 * 1000 });
+    await getRedisConnection().set(stateKey(state), String(providerId), 'EX', STATE_TTL_SECONDS);
     const params = new URLSearchParams({
       client_id: provider.clientId!,
       redirect_uri: this.callbackUrl(providerId),
@@ -162,11 +173,13 @@ export class OidcService {
   }
 
   async handleCallback(providerId: number, code: string, state: string) {
-    const stored = stateStore.get(state);
-    if (!stored || stored.providerId !== providerId || stored.expiresAt < Date.now()) {
+    const redis = getRedisConnection();
+    const key = stateKey(state);
+    const stored = await redis.get(key);
+    if (!stored || Number(stored) !== providerId) {
       throw new UnauthorizedException('Invalid or expired state');
     }
-    stateStore.delete(state);
+    await redis.del(key);
 
     const provider = await this.getProvider(providerId);
     // buildAuthorizationUrl checks isEnabled before issuing the state, but a

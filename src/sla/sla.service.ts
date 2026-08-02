@@ -134,9 +134,17 @@ export class SlaService {
           break;
         }
         case 'interface_util': {
+          // Was querying a column ('util_pct') that has never existed —
+          // the real column is 'utilization_pct' (migration 003). Silently
+          // swallowed by the catch below into `currentValue = null` for
+          // every evaluation since this was written, on top of
+          // interface_metrics itself being unpopulated until
+          // simulation.service.ts's persistInterfaceMetrics() (see
+          // AUDIT-REPORT.md L1) — a compounding version of the same bug
+          // reports.service.ts's interfaceUtilization() had.
           const { rows } = await this.db.query<{ avg_util: string }>(`
-            SELECT AVG(latest.util_pct) AS avg_util FROM (
-              SELECT DISTINCT ON (interface_id) util_pct
+            SELECT AVG(latest.utilization_pct) AS avg_util FROM (
+              SELECT DISTINCT ON (interface_id) utilization_pct
               FROM interface_metrics ORDER BY interface_id, time DESC
             ) latest
           `);

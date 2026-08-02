@@ -188,13 +188,23 @@ export class AlertEvaluator {
     }
 
     try {
-      await this.db.query(
+      const { rowCount } = await this.db.query(
         `INSERT INTO alerts
            (id, severity, kind, title, device_name, device_id, rule, root_cause, child_count, fired_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
          ON CONFLICT (id) DO NOTHING`,
         [id, rule.severity, rule.kind, title, d.name, deviceId, rule.ruleId, rootCause, childCount],
       );
+      // ON CONFLICT DO NOTHING silently swallows the insert if `id` already
+      // exists (e.g. counter was reset by a restart and reissued an id from
+      // a previous run) — without this check, openAlerts would still be
+      // mutated even though nothing was actually written, so the alert
+      // never surfaces and a later "clear" would touch an unrelated row
+      // (AUDIT-REPORT.md M2).
+      if (!rowCount) {
+        this.log.warn(`Alert id ${id} already exists — skipping (not opening in-memory state for it)`);
+        return;
+      }
       this.openAlerts.set(key, id);
       this.log.log(`FIRED ${id} [${rule.severity}] ${title}`);
       Promise.resolve()
@@ -232,11 +242,30 @@ export class AlertEvaluator {
           this.openAlerts.set(`${r.device_name}:${r.rule}`, r.id);
         }
       });
+      await this.syncCounterFromDb();
       this.initialized = true;
       this.log.log(`Synced ${rows.length} open alerts from DB`);
     } catch (err: any) {
       this.log.warn(`Alert sync failed: ${err.message}`);
       this.initialized = true; // don't retry forever
+    }
+  }
+
+  // `counter` used to always restart at 90300 on boot, so after a restart the
+  // evaluator handed out ids that already existed from the previous run —
+  // silently dropped by ON CONFLICT DO NOTHING (see fireAlert). Seed it from
+  // the actual max id in the table instead (AUDIT-REPORT.md M2).
+  private async syncCounterFromDb(): Promise<void> {
+    try {
+      const { rows } = await this.db.query<{ max_id: number | null }>(
+        `SELECT MAX(substring(id from 5)::int) AS max_id FROM alerts WHERE id LIKE 'ALR-%'`,
+      );
+      const maxId = rows[0]?.max_id;
+      if (maxId != null && maxId + 1 > this.counter) {
+        this.counter = maxId + 1;
+      }
+    } catch (err: any) {
+      this.log.warn(`Alert id counter sync failed, keeping default: ${err.message}`);
     }
   }
 
